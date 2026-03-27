@@ -784,21 +784,9 @@
             "M208.4,188.5c36.2,4.3,75.5,4,111.2-2.1c24.1-4.1,50.6-11.7,64.9-27.8c7.2-8.1,14.9-16.5,21.6-24.9c2-2.5,16-34.9,11-34.6c-7.6,0.5-13.5,4.9-19.7,8.2c-6.2,3.4-15.1,5.7-21.3,2.2c-6.2-3.6-5.5-11.1-1-15.9s11.6-7.6,17.6-11.2s11.5-8.9,10.6-14.7c-7.4-5.5-19.3,0-26.5,5.3s-18.8,11-26.5,5.9c-0.1-13.2,12.4-25.7,29.2-29c-0.3-4.4-5.3-7.9-10.8-9.1c-5.6-1.2-11.5-0.4-16.9,0.5c-18.4,3.5-35.3,11-48.5,21.3c-8.1,6.3-16.5,14.3-28.3,14.2c-4.7-5.9,2.5-13,9.4-17.3c6.9-4.5,14.6-10.9,10.8-17.1c-18.1-1.1-35.2,7-46.4,17.7s-17.3,23.8-23.3,36.7c-4.5,0.3-9.2-0.4-13.1-2.2c3.3-14.5,6.5-29,9.8-43.4c-9.4,0.3-14.8,7.9-18.1,14.5c-11.7,23-29.8,54.5-22.8,79.2C183,152.1,194.3,186.9,208.4,188.5z",
         ],
     };
-    /** Capsule (rugby) body — bake space 720×500 */
-    var BODY_CAPSULE_BAKE = { cx: 274, cy: 246, w: 260, h: 118, r: 59 };
+    const BODY_PATH = "M312.2,319.2h-180c-40.5,0-99-32.7-99-73.2v-1.5c0-40.5,58.7-73.2,99-73.2h180c40.5,0,105.5,32.7,105.5,73.2v1.5C417.8,286.5,352.7,319.2,312.2,319.2z";
+    const EYE_PATH = "M102.6,215.7c0,18.7-15.2,33.9-33.9,33.9s-33.9-15.2-33.9-33.9s15.2-33.9,33.9-33.9S102.6,197,102.6,215.7z";
     var FISH_PHYS = { friction: 0.98, baseSpeed: 0.5, yCapRatio: 0.3, maxTilt: 0.15, chaseTiltMax: 0.17 };
-
-    function pathCapsuleBake() {
-        var c = BODY_CAPSULE_BAKE;
-        var x = c.cx - c.w / 2;
-        var y = c.cy - c.h / 2;
-        var rr = Math.min(c.r, c.w / 2, c.h / 2);
-        var p = new Path2D();
-        if (typeof p.roundRect === "function") p.roundRect(x, y, c.w, c.h, rr);
-        else p.rect(x, y, c.w, c.h);
-        return p;
-    }
-    var BODY_CAPSULE_PATH_BAKE = pathCapsuleBake();
 
     function assignPatternName(fish) {
         var rng = createRng([fish.id || "x", "pattern"]);
@@ -820,7 +808,7 @@
             return ((c - 48) % 10) / 9;
         };
         ctx.save();
-        ctx.clip(BODY_CAPSULE_PATH_BAKE);
+        ctx.clip(new Path2D(BODY_PATH));
         var seed = fish.patternSeed || 12345;
         var rnd = function () {
             seed = (seed * 1664525 + 1013904223) >>> 0;
@@ -843,7 +831,7 @@
             g.addColorStop(0.45, "rgba(30, 27, 75, 0.22)");
             g.addColorStop(1, "rgba(0,0,0,0)");
             ctx.fillStyle = g;
-            ctx.fill(BODY_CAPSULE_PATH_BAKE);
+            ctx.fill(new Path2D(BODY_PATH));
             ctx.fillStyle = "rgba(255,255,255,0.55)";
             for (var s = 0; s < 48; s++) {
                 var si = (s * 3) % 12;
@@ -894,29 +882,6 @@
         ctx.restore();
     }
 
-    function drawTailRippleLocal(ctx2, fish, ripplePhase) {
-        var halfW = BODY_CAPSULE_BAKE.w / 2;
-        var halfH = BODY_CAPSULE_BAKE.h / 2;
-        var tailBaseX = -halfW - 1;
-        var layers = 3;
-        for (var i = 0; i < layers; i++) {
-            var lag = 0.35 * (fish.tailLag || 0) * (1 - i * 0.25);
-            var wave = Math.sin(ripplePhase + i * 0.9 + fish.wagPhase) * (6 + i * 2.5);
-            var tx = tailBaseX - i * 16 + lag;
-            var ty = wave * 0.65;
-            ctx2.beginPath();
-            ctx2.moveTo(tailBaseX + 3, ty * 0.15);
-            ctx2.quadraticCurveTo(tx - 20, ty + 5 + i * 4, tx - 32 - i * 12, ty * 0.45);
-            ctx2.lineTo(tx - 24 - i * 10, -halfH * 0.2 + ty * 0.25);
-            ctx2.quadraticCurveTo(tx - 20, -halfH * 0.18, tailBaseX + 3, -ty * 0.12);
-            ctx2.closePath();
-            ctx2.fillStyle = fish.tailColor;
-            ctx2.globalAlpha = 0.88 - i * 0.12;
-            ctx2.fill();
-        }
-        ctx2.globalAlpha = 1;
-    }
-
     var BAKE_SCALE = 1.5;
     var BODY_BAKE_W = Math.ceil(720 * BAKE_SCALE);
     var BODY_BAKE_H = Math.ceil(500 * BAKE_SCALE);
@@ -945,20 +910,16 @@
         bctx.save();
         bctx.scale(BAKE_SCALE, BAKE_SCALE);
         bctx.fillStyle = fish.color;
-        bctx.fill(BODY_CAPSULE_PATH_BAKE);
+        bctx.fill(new Path2D(BODY_PATH));
         drawFishPattern(bctx, fish);
-        var ex = BODY_CAPSULE_BAKE.cx + BODY_CAPSULE_BAKE.w * 0.32;
-        var ey = BODY_CAPSULE_BAKE.cy - 8;
         bctx.fillStyle = "#ffffff";
-        bctx.beginPath();
-        bctx.arc(ex, ey, 14, 0, Math.PI * 2);
-        bctx.fill();
+        bctx.fill(new Path2D(EYE_PATH));
         bctx.strokeStyle = "#9ca3af";
         bctx.lineWidth = 2.5;
-        bctx.stroke();
+        bctx.stroke(new Path2D(EYE_PATH));
         bctx.fillStyle = "#000000";
         bctx.beginPath();
-        bctx.arc(ex + 3, ey, 6, 0, Math.PI * 2);
+        bctx.arc(68.7, 215.7, 9, 0, Math.PI * 2);
         bctx.fill();
         bctx.restore();
         return c;
@@ -1387,7 +1348,8 @@
                 ctx.fillText(this.sex === "M" ? "♂" : "♀", 0, -32);
             }
 
-            var currentSize = 0.08 + Math.min(1, this.age / 2) * 0.12;
+            let currentSize = 0.08 + Math.min(1, this.age / 2) * 0.12;
+            var swimTilt = this.vy * 0.12 * this.dir;
             var facePartner =
                 breedingAnim &&
                 (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") &&
@@ -1395,11 +1357,18 @@
             var otherFish = facePartner ? (this === breedingAnim.a ? breedingAnim.b : breedingAnim.a) : null;
             var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : this.flipScale;
             var effFlip = Math.max(0.4, Math.abs(rawDraw)) * (rawDraw >= 0 ? 1 : -1);
-            ctx.rotate(this.pitchAngle + (this.isDead ? 0 : this.turnTilt));
+            ctx.rotate(this.pitchAngle + swimTilt + (this.isDead ? 0 : this.turnTilt));
             ctx.scale(-effFlip * currentSize, currentSize);
-            ctx.translate(-BODY_CAPSULE_BAKE.cx, -BODY_CAPSULE_BAKE.cy);
+            ctx.translate(-150, -250);
+            var wag = Math.sin(this.wagPhase) * 7;
 
-            drawTailRippleLocal(ctx, this, db.timer * 0.12 + this.wagPhase);
+            this.breedObj.forEach((p, i) => {
+                ctx.save();
+                if (i === 0) ctx.translate(wag, 0);
+                ctx.fillStyle = this.tailColor;
+                ctx.fill(new Path2D(p));
+                ctx.restore();
+            });
 
             var bake = getBodyBakeCanvas(this);
             ctx.drawImage(bake, 0, 0, 720, 500);
