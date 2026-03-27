@@ -49,10 +49,19 @@
 
         #notice { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #fff; padding: 10px 20px; border-radius: 20px; font-weight: bold; display: none; pointer-events: auto; z-index: 50; }
 
-        /* Zen Clock Widget */
-        #zen-widget { position: absolute; top: 100px; left: 100px; background: rgba(15, 23, 42, 0.7); color: white; padding: 15px 25px; border-radius: 15px; backdrop-filter: blur(5px); display: none; cursor: default; pointer-events: none; user-select: none; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 100; text-align: center; }
+        /* Zen Clock Widget — ลากได้ (pointer-events ใน zen) */
+        #zen-widget { position: absolute; top: 100px; left: 100px; background: rgba(15, 23, 42, 0.7); color: white; padding: 15px 25px; border-radius: 15px; backdrop-filter: blur(5px); display: none; cursor: grab; pointer-events: none; user-select: none; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 100; text-align: center; touch-action: none; }
+        body.zen-mode #zen-widget { pointer-events: auto; z-index: 10030; }
+        #zen-widget:active { cursor: grabbing; }
         body.zen-mode #aquarium { z-index: 40; }
-        body.zen-mode #zen-widget { z-index: 41; }
+        #zen-exit-modal { display: none; position: fixed; inset: 0; z-index: 10050; background: rgba(0,0,0,0.45); align-items: center; justify-content: center; pointer-events: auto; }
+        #zen-exit-modal.open { display: flex; }
+        #zen-exit-box { background: #fff; color: #1e293b; padding: 22px 24px; border-radius: 14px; max-width: 320px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
+        #zen-exit-box p { margin: 0 0 16px; font-size: 1rem; }
+        #zen-exit-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        #zen-exit-actions button { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; }
+        .zen-exit-cancel { background: #e2e8f0; color: #334155; }
+        .zen-exit-ok { background: #ef4444; color: #fff; }
         #zen-time { font-size: 2.5rem; font-weight: 300; font-family: monospace; letter-spacing: 2px; }
         #zen-stats { font-size: 0.8rem; color: #94a3b8; margin-top: 5px; display: flex; justify-content: space-around; }
 
@@ -125,7 +134,17 @@
     <div id="zen-widget">
         <div id="zen-time">12:00</div>
         <div id="zen-stats"><span>🌿 <span id="zen-o2">100</span>%</span> <span>💧 <span id="zen-waste">0</span>%</span></div>
-        <p style="font-size:0.7rem;color:#94a3b8;margin-top:8px;">แตะที่ตู้น้ำเพื่อออก</p>
+        <p style="font-size:0.7rem;color:#94a3b8;margin-top:8px;">ลากย้ายนาฬิกาได้ · แตะตู้เพื่อยืนยันออกจาก Zen</p>
+    </div>
+
+    <div id="zen-exit-modal" aria-hidden="true">
+        <div id="zen-exit-box" onclick="event.stopPropagation()">
+            <p>ออกจาก Zen Mode?</p>
+            <div id="zen-exit-actions">
+                <button type="button" class="zen-exit-cancel" onclick="cancelZenExitPrompt()">อยู่ต่อ</button>
+                <button type="button" class="zen-exit-ok" onclick="confirmZenExitPrompt()">ออก</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -679,6 +698,7 @@
         lastAutoFeedMs: 0,
         autoBreedGenetics: false,
         autoBreedCooldown: 0,
+        autoBreedIntervalFrames: 10800,
     };
     let fishes = [],
         foods = [],
@@ -734,7 +754,6 @@
     const BODY_PATH = "M312.2,319.2h-180c-40.5,0-99-32.7-99-73.2v-1.5c0-40.5,58.7-73.2,99-73.2h180c40.5,0,105.5,32.7,105.5,73.2v1.5C417.8,286.5,352.7,319.2,312.2,319.2z";
     const EYE_PATH = "M102.6,215.7c0,18.7-15.2,33.9-33.9,33.9s-33.9-15.2-33.9-33.9s15.2-33.9,33.9-33.9S102.6,197,102.6,215.7z";
 
-    var PATTERN_NAMES = ["Solid", "Marble", "Galaxy", "Koi", "Neon"];
     function assignPatternName(fish) {
         var rng = createRng([fish.id || "x", "pattern"]);
         var t = (GAME_RANK_BY_LETTER[fish.gameRarityLetter] || 1) - 1;
@@ -746,8 +765,9 @@
         else fish.patternName = "Neon";
         fish.patternSeed = hashStringToSeed(String(fish.id) + "|pat");
     }
-    /** วาดลายทับลำตัว (clip ด้วย BODY_PATH) — เรียกในระบบพิกัดปลา หลังเติมสีตัว */
+    /** วาดลายทับลำตัว — ปิดการแสดงผลชั่วคราว (เก็บ patternName ใน fishData ไว้ใช้ภายหลัง) */
     function drawFishPattern(ctx, fish) {
+        return;
         if (!fish.patternName || fish.patternName === "Solid") return;
         ctx.save();
         ctx.clip(new Path2D(BODY_PATH));
@@ -1139,7 +1159,6 @@
 
             ctx.fillStyle = this.color;
             ctx.fill(new Path2D(BODY_PATH));
-            drawFishPattern(ctx, this);
 
             ctx.fillStyle = "#ffffff";
             ctx.fill(new Path2D(EYE_PATH));
@@ -1236,23 +1255,84 @@
             startBy: father.y,
             mx: mx,
             my: my,
-            approachSpeed: 1.65,
-            approachAccel: 0.038,
-            approachSpeedMax: 4.2,
+            approachSpeed: 0.95,
+            approachAccel: 0.02,
+            approachSpeedMax: 2.5,
         };
     }
 
-    var zenExitHandler = function (e) {
+    function openZenExitModal() {
+        var m = document.getElementById("zen-exit-modal");
+        if (m) {
+            m.classList.add("open");
+            m.setAttribute("aria-hidden", "false");
+        }
+    }
+    function cancelZenExitPrompt() {
+        var m = document.getElementById("zen-exit-modal");
+        if (m) {
+            m.classList.remove("open");
+            m.setAttribute("aria-hidden", "true");
+        }
+    }
+    function confirmZenExitPrompt() {
+        cancelZenExitPrompt();
+        if (isZenMode) toggleZenMode();
+    }
+    window.cancelZenExitPrompt = cancelZenExitPrompt;
+    window.confirmZenExitPrompt = confirmZenExitPrompt;
+
+    document.getElementById("zen-exit-modal").addEventListener("click", function (e) {
+        if (e.target === this) cancelZenExitPrompt();
+    });
+
+    var zenDrag = { active: false, ox: 0, oy: 0, sx: 0, sy: 0 };
+    function setupZenWidgetDrag() {
+        var w = document.getElementById("zen-widget");
+        if (!w) return;
+        w.addEventListener("pointerdown", function (e) {
+            if (!isZenMode) return;
+            e.preventDefault();
+            zenDrag.active = true;
+            zenDrag.ox = parseFloat(w.style.left) || w.offsetLeft;
+            zenDrag.oy = parseFloat(w.style.top) || w.offsetTop;
+            zenDrag.sx = e.clientX;
+            zenDrag.sy = e.clientY;
+            w.setPointerCapture(e.pointerId);
+        });
+        w.addEventListener("pointermove", function (e) {
+            if (!zenDrag.active || !isZenMode) return;
+            e.preventDefault();
+            var nx = zenDrag.ox + (e.clientX - zenDrag.sx);
+            var ny = zenDrag.oy + (e.clientY - zenDrag.sy);
+            nx = Math.max(8, Math.min(window.innerWidth - w.offsetWidth - 8, nx));
+            ny = Math.max(8, Math.min(window.innerHeight - w.offsetHeight - 8, ny));
+            w.style.left = nx + "px";
+            w.style.top = ny + "px";
+        });
+        w.addEventListener("pointerup", function (e) {
+            zenDrag.active = false;
+            try {
+                w.releasePointerCapture(e.pointerId);
+            } catch (err) {}
+        });
+        w.addEventListener("pointercancel", function () {
+            zenDrag.active = false;
+        });
+    }
+    setupZenWidgetDrag();
+
+    var zenCanvasExitHandler = function (e) {
         if (!isZenMode || e.target !== canvas) return;
         e.preventDefault();
-        toggleZenMode();
+        openZenExitModal();
     };
 
-    canvas.addEventListener("click", zenExitHandler);
+    canvas.addEventListener("click", zenCanvasExitHandler);
     canvas.addEventListener("touchend", function (e) {
         if (!isZenMode) return;
         e.preventDefault();
-        zenExitHandler(e);
+        zenCanvasExitHandler(e);
     }, { passive: false });
 
     canvas.addEventListener("mousedown", (e) => {
@@ -1260,7 +1340,12 @@
         if (breedingAnim) return;
 
         if (currentMode === "decor") {
-            decors.push({ x: e.clientX, y: e.clientY, phase: Math.random() * Math.PI * 2 });
+            decors.push({
+            x: e.clientX,
+            y: e.clientY,
+            phase: Math.random() * Math.PI * 2,
+            kelpColor: randomMutedKelpRgb(),
+        });
             cancelMode();
             db.gold -= 300;
             return;
@@ -1433,6 +1518,7 @@
         document.getElementById("ui-wrapper").style.opacity = isZenMode ? "0" : "1";
         zw.style.display = isZenMode ? "block" : "none";
         document.getElementById("ui-wrapper").style.pointerEvents = isZenMode ? "none" : "";
+        cancelZenExitPrompt();
         if (isZenMode) {
             var el = document.documentElement;
             if (el.requestFullscreen) el.requestFullscreen().catch(function () {});
@@ -1457,6 +1543,9 @@
         var btn = document.getElementById("btn-auto-breed");
         if (btn) {
             btn.innerText = db.autoBreedGenetics ? "🧬 ผสมอัตโนมัติ: เปิด" : "🧬 ผสมอัตโนมัติ: ปิด";
+        }
+        if (db.autoBreedGenetics) {
+            db.autoBreedCooldown = db.timer + 3600;
         }
     }
 
@@ -1485,7 +1574,7 @@
         var fi = Math.floor(Math.random() * females.length);
         var mi = Math.floor(Math.random() * males.length);
         startBreedingSequence(females[fi], males[mi]);
-        db.autoBreedCooldown = db.timer + 420;
+        db.autoBreedCooldown = db.timer + db.autoBreedIntervalFrames;
     }
 
     function enterDecorMode() {
@@ -1642,13 +1731,20 @@
         loop();
     }
 
+    function randomMutedKelpRgb() {
+        var r = 95 + Math.floor(Math.random() * 38);
+        var g = 125 + Math.floor(Math.random() * 42);
+        var b = 98 + Math.floor(Math.random() * 35);
+        return "rgb(" + r + "," + g + "," + b + ")";
+    }
     function drawDecors() {
         decors.forEach((d) => {
+            if (!d.kelpColor) d.kelpColor = randomMutedKelpRgb();
             var ph = d.phase != null ? d.phase : 0;
-            var sway = Math.sin(db.timer * 0.014 + d.x * 0.008 + ph) * 4;
+            var sway = Math.sin(db.timer * 0.012 + d.x * 0.006 + ph) * 3;
             var cx = d.x + sway;
             var cy = d.y;
-            var R = 42;
+            var R = 40;
             var leftCx = cx - R / 2;
             var rightCx = cx + R / 2;
             var tipY = cy - (Math.sqrt(3) * R) / 2;
@@ -1661,11 +1757,10 @@
             ctx.arc(leftCx, cy, R, -Math.PI / 3, Math.PI / 3, true);
             ctx.arc(rightCx, cy, R, (2 * Math.PI) / 3, (4 * Math.PI) / 3, true);
             ctx.closePath();
-            var gx = ctx.createLinearGradient(leftCx, cy, rightCx, cy);
-            gx.addColorStop(0, "rgba(187, 247, 208, 0.9)");
-            gx.addColorStop(1, "rgba(22, 101, 52, 0.82)");
-            ctx.fillStyle = gx;
+            ctx.fillStyle = d.kelpColor;
+            ctx.globalAlpha = 0.72;
             ctx.fill();
+            ctx.globalAlpha = 1;
             ctx.restore();
         });
     }
@@ -1712,7 +1807,7 @@
         foods = foods.filter((f) => !f.eaten && f.y < canvas.height);
         ctx.fillStyle = "#e67e22";
         foods.forEach((f) => {
-            f.y += 2.5;
+            f.y += 1.05;
             ctx.beginPath();
             ctx.arc(f.x, f.y, 5, 0, Math.PI * 2);
             ctx.fill();
