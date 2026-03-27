@@ -1083,6 +1083,7 @@
             this.breedCooldownUntilMs = 0;
             this.aiPhase = "cruise";
             this.aiTimer = 0;
+            this.wanderCooldown = 400 + Math.floor(Math.random() * 500);
             this.wanderTx = this.x;
             this.wanderTy = this.y;
             this.vx = this.dir * this.baseVx * this.personalSpeed;
@@ -1092,7 +1093,6 @@
             this.bodyW = 52;
             this.visualScaleX = this.vx > 0 ? 1 : -1;
             this.flipScale = this.visualScaleX;
-            this._faceDead = 0.038;
             if (!this.patternName) assignPatternName(this);
             if (parent1 && parent2) {
                 this._parentSameRegion = parent1.baseClass === parent2.baseClass;
@@ -1164,7 +1164,7 @@
             this.visualScaleX =
                 typeof s.visualScaleX === "number" ? s.visualScaleX : typeof s.flipScale === "number" ? s.flipScale : this.vx > 0 ? 1 : -1;
             this.flipScale = this.visualScaleX;
-            this._faceDead = 0.038;
+            this.wanderCooldown = typeof s.wanderCooldown === "number" ? s.wanderCooldown : 400;
             this._parentSameRegion = s._parentSameRegion;
             this._parentBaseClassA = s._parentBaseClassA;
             this._parentBaseClassB = s._parentBaseClassB;
@@ -1264,6 +1264,13 @@
                     updateUI();
                 }
             } else {
+                this.wanderCooldown--;
+                if (this.wanderCooldown <= 0) {
+                    this.wanderCooldown = 480 + Math.floor(Math.random() * 720);
+                    var mg = 90;
+                    this.targetX = mg + Math.random() * (canvasCssW - mg * 2);
+                    this.targetY = WATERLINE + 50 + Math.random() * (canvasCssH - WATERLINE - 100);
+                }
                 var tdx = this.targetX - this.x;
                 var tdy = this.targetY - this.y;
                 var tdist = Math.hypot(tdx, tdy) + 1e-6;
@@ -1283,8 +1290,6 @@
 
             let speedMul = window.speedMultiplier !== undefined ? window.speedMultiplier : 0.5;
             let curVx = this.vx * speedMul;
-            let dy = this.targetY - this.y;
-            this.vy += (((dy > 0 ? 1 : -1) * 0.6 * speedMul) - this.vy) * 0.05;
 
             if (
                 (this.x > canvasCssW - (this.w / 2 + 20) && this.vx > 0) ||
@@ -1311,23 +1316,15 @@
                 (Math.max(-0.15, Math.min(0.15, (this.vy / (Math.abs(curVx) || 1)) * 0.2)) - this.tilt) * 0.1;
             this.pitchAngle = this.tilt;
 
-            var fd = this._faceDead != null ? this._faceDead : 0.038;
-            var wantFace = null;
-            if (this.vx > fd) wantFace = 1;
-            else if (this.vx < -fd) wantFace = -1;
-            if (wantFace !== null) {
-                this.visualScaleX += (wantFace - this.visualScaleX) * 0.12;
+            var faceFromMotion = moveStep > 0.0008 ? 1 : moveStep < -0.0008 ? -1 : null;
+            if (faceFromMotion !== null) {
+                this.visualScaleX += (faceFromMotion - this.visualScaleX) * 0.18;
             }
             this.flipScale = this.visualScaleX;
 
             this.tailPhase += 0.042 + Math.abs(curVx) * 0.016;
             this.wagPhase = this.tailPhase;
             this.turnLag *= 0.92;
-
-            if (Math.random() < 0.0025) {
-                this.targetX = Math.random() * canvasCssW;
-                this.targetY = 100 + Math.random() * (canvasCssH - 200);
-            }
 
             var z = Math.abs(this.flipScale);
             var curve = z < 0.55 ? this.dir * (0.55 - z) * 0.95 : 0;
@@ -2365,6 +2362,7 @@
             breedCooldownUntilMs: f.breedCooldownUntilMs,
             aiPhase: f.aiPhase,
             aiTimer: f.aiTimer,
+            wanderCooldown: f.wanderCooldown,
             wanderTx: f.wanderTx,
             wanderTy: f.wanderTy,
             vx: f.vx,
