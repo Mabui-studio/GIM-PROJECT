@@ -1,0 +1,647 @@
+"use strict";
+(() => {
+  // src/fish/rng.ts
+  function hashStringToSeed(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  function mulberry32(seed) {
+    return () => {
+      let t = seed += 1831565813;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function createRng(seedParts) {
+    const seed = hashStringToSeed(seedParts.join("|"));
+    return mulberry32(seed);
+  }
+
+  // src/fish/stats.ts
+  var KEYS = ["hp", "atk", "def", "spd"];
+  function sumStats(s) {
+    return s.hp + s.atk + s.def + s.spd;
+  }
+  function scaleStatBlock(s, factor) {
+    return {
+      hp: s.hp * factor,
+      atk: s.atk * factor,
+      def: s.def * factor,
+      spd: s.spd * factor
+    };
+  }
+  function normalizeStatSum(raw, targetSum, rng) {
+    const current = sumStats(raw);
+    if (current <= 0) {
+      return distributeEven(targetSum, rng);
+    }
+    const scaled = scaleStatBlock(raw, targetSum / current);
+    let rounded = {
+      hp: Math.round(scaled.hp),
+      atk: Math.round(scaled.atk),
+      def: Math.round(scaled.def),
+      spd: Math.round(scaled.spd)
+    };
+    let drift = targetSum - sumStats(rounded);
+    const order = [...KEYS].sort((a, b) => {
+      const fracA = scaled[a] - rounded[a];
+      const fracB = scaled[b] - rounded[b];
+      if (fracA !== fracB) return fracB - fracA;
+      return a.localeCompare(b);
+    });
+    let i = 0;
+    while (drift !== 0 && i < 1e3) {
+      const k = order[i % order.length];
+      if (drift > 0) {
+        rounded = { ...rounded, [k]: rounded[k] + 1 };
+        drift -= 1;
+      } else {
+        if (rounded[k] > 1) {
+          rounded = { ...rounded, [k]: rounded[k] - 1 };
+          drift += 1;
+        }
+      }
+      i += 1;
+    }
+    return rounded;
+  }
+  function distributeEven(targetSum, rng) {
+    const base = Math.floor(targetSum / 4);
+    let rest = targetSum - base * 4;
+    const out = { hp: base, atk: base, def: base, spd: base };
+    const order = [...KEYS].sort(() => rng() - 0.5);
+    for (const k of order) {
+      if (rest <= 0) break;
+      out[k] += 1;
+      rest -= 1;
+    }
+    return out;
+  }
+
+  // src/fish/types.ts
+  var SPECIES_BASE_STATS = {
+    Central: { hp: 50, atk: 50, def: 50, spd: 50 },
+    Mahachai: { hp: 45, atk: 60, def: 45, spd: 50 },
+    Isan: { hp: 45, atk: 45, def: 50, spd: 60 },
+    South: { hp: 55, atk: 45, def: 55, spd: 45 }
+  };
+  var RARITY_ORDER = [
+    "Common",
+    "UC",
+    "R",
+    "SR",
+    "SSR",
+    "UR",
+    "GOD"
+  ];
+  var RARITY_MULTIPLIER = {
+    Common: 1,
+    UC: 1.1,
+    R: 1.3,
+    SR: 1.6,
+    SSR: 1.8,
+    UR: 2,
+    GOD: 2.5
+  };
+  var BreedingIntegrityError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "BreedingIntegrityError";
+    }
+  };
+
+  // src/fish/breeding.ts
+  function assertBreedingIntegrity(mother, father, ownerId) {
+    if (mother.gender !== "F" || father.gender !== "M") {
+      throw new BreedingIntegrityError(
+        "\u0E01\u0E32\u0E23\u0E1C\u0E2A\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E43\u0E0A\u0E49\u0E41\u0E21\u0E48 (F) \u0E40\u0E1B\u0E47\u0E19 Genetic Key \u0E41\u0E25\u0E30\u0E1E\u0E48\u0E2D (M) \u0E40\u0E1B\u0E47\u0E19 Combat Template"
+      );
+    }
+    if (mother.ownerId !== father.ownerId || mother.ownerId !== ownerId) {
+      throw new BreedingIntegrityError(
+        "ownerId \u0E02\u0E2D\u0E07\u0E1E\u0E48\u0E2D\u0E41\u0E21\u0E48\u0E41\u0E25\u0E30\u0E25\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E15\u0E23\u0E07\u0E01\u0E31\u0E19 \u2014 relational integrity"
+      );
+    }
+  }
+  function rarityIndex(r) {
+    return RARITY_ORDER.indexOf(r);
+  }
+  function clampRarityIndex(i) {
+    return Math.max(0, Math.min(RARITY_ORDER.length - 1, i));
+  }
+  function rollOffspringRarity(mother, father, rng) {
+    const im = rarityIndex(mother.rarity);
+    const id = rarityIndex(father.rarity);
+    const base = im * 0.55 + id * 0.45 + (rng() - 0.5) * 1.2;
+    let idx = Math.round(base);
+    if (rng() < 0.08) idx += 1;
+    if (rng() < 0.02) idx += 1;
+    return RARITY_ORDER[clampRarityIndex(idx)];
+  }
+  function pickOffspringSpecies(motherSpecies, fatherSpecies, rng) {
+    return rng() < 0.6 ? motherSpecies : fatherSpecies;
+  }
+  function blendBaseStats(mother, father, targetSpecies, rng) {
+    const m = SPECIES_BASE_STATS[mother.species];
+    const f = SPECIES_BASE_STATS[father.species];
+    const t = SPECIES_BASE_STATS[targetSpecies];
+    const pull = (rng() - 0.5) * 2;
+    const raw = {
+      hp: m.hp * 0.6 + f.hp * 0.4 + (t.hp - (m.hp * 0.6 + f.hp * 0.4)) * 0.12 * pull,
+      atk: m.atk * 0.6 + f.atk * 0.4 + (t.atk - (m.atk * 0.6 + f.atk * 0.4)) * 0.12 * pull,
+      def: m.def * 0.6 + f.def * 0.4 + (t.def - (m.def * 0.6 + f.def * 0.4)) * 0.12 * pull,
+      spd: m.spd * 0.6 + f.spd * 0.4 + (t.spd - (m.spd * 0.6 + f.spd * 0.4)) * 0.12 * pull
+    };
+    return normalizeStatSum(raw, 200, rng);
+  }
+  function rollBirthSwing(rng) {
+    const swing = () => 0.9 + rng() * 0.2;
+    return { hp: swing(), atk: swing(), def: swing(), spd: swing() };
+  }
+  function computePrecision(mother, father, rng) {
+    const nextGen = Math.max(mother.bloodline.generation, father.bloodline.generation) + 1;
+    const genStrain = Math.min(nextGen / 10, 1);
+    const base = mother.precisionScore * 0.72 + father.precisionScore * 0.18;
+    const stability = 1 - genStrain * 0.35;
+    const jitter = (rng() - 0.5) * 0.06 * (1 - mother.precisionScore * 0.5);
+    return Math.max(0, Math.min(1, base * stability + jitter));
+  }
+  function inheritVisualLayers(mother, father, precision, rng) {
+    const useMotherL4 = precision >= 0.48 || rng() < mother.precisionScore * 0.4;
+    return {
+      l1Body: rng() < 0.65 ? mother.visualLayers.l1Body : father.visualLayers.l1Body,
+      l2Fin: rng() < 0.65 ? mother.visualLayers.l2Fin : father.visualLayers.l2Fin,
+      l3Iridescent: mother.visualLayers.l3Iridescent,
+      l4Opaque: useMotherL4 ? mother.visualLayers.l4Opaque : father.visualLayers.l4Opaque
+    };
+  }
+  function inheritActiveSkills(father, precision) {
+    if (father.activeSkillIds.length === 0) return [];
+    const cap = precision < 0.35 ? Math.max(1, father.activeSkillIds.length - 1) : father.activeSkillIds.length;
+    return father.activeSkillIds.slice(0, cap);
+  }
+  function breedFish(parents, options) {
+    const { mother, father } = parents;
+    assertBreedingIntegrity(mother, father, options.ownerId);
+    const seed = [
+      options.entropy ?? "default-entropy",
+      options.offspringId,
+      mother.id,
+      father.id
+    ];
+    const rng = createRng(seed);
+    const species = pickOffspringSpecies(mother.species, father.species, rng);
+    const rarity = rollOffspringRarity(mother, father, rng);
+    const baseStats = blendBaseStats(mother, father, species, rng);
+    const birthSwing = rollBirthSwing(rng);
+    const precisionScore = computePrecision(mother, father, rng);
+    const visualLayers = inheritVisualLayers(mother, father, precisionScore, rng);
+    const activeSkillIds = inheritActiveSkills(father, precisionScore);
+    const nextGen = Math.max(mother.bloodline.generation, father.bloodline.generation) + 1;
+    const offspring = {
+      id: options.offspringId,
+      ownerId: options.ownerId,
+      gender: rng() < 0.5 ? "F" : "M",
+      species,
+      rarity,
+      baseStats,
+      birthSwing,
+      precisionScore,
+      visualLayers,
+      bloodline: {
+        motherId: mother.id,
+        fatherId: father.id,
+        generation: nextGen
+      },
+      activeSkillIds
+    };
+    return { offspring };
+  }
+  function computeEffectiveBaseStats(fish) {
+    const m = RARITY_MULTIPLIER[fish.rarity];
+    return {
+      hp: fish.baseStats.hp * fish.birthSwing.hp * m,
+      atk: fish.baseStats.atk * fish.birthSwing.atk * m,
+      def: fish.baseStats.def * fish.birthSwing.def * m,
+      spd: fish.baseStats.spd * fish.birthSwing.spd * m
+    };
+  }
+
+  // src/browser/fish-bridge.ts
+  function patternDnaFromId(id) {
+    let h = 0;
+    const str = String(id);
+    for (let i = 0; i < str.length; i++) h = h * 31 + str.charCodeAt(i) >>> 0;
+    return String(h).padStart(12, "0").slice(0, 12);
+  }
+  function rollBirthSwing2(rng) {
+    const swing = () => 0.9 + rng() * 0.2;
+    return { hp: swing(), atk: swing(), def: swing(), spd: swing() };
+  }
+  function presentationToSpecies(presentation) {
+    return presentation === "GALAXY" ? "Isan" : "Central";
+  }
+  function speciesToPresentation(species) {
+    return species === "Mahachai" || species === "Isan" ? "GALAXY" : "KOI";
+  }
+  function createStarterFish(id, ownerId, presentation, sex) {
+    const rng = createRng(["gacha", id, ownerId]);
+    const species = presentationToSpecies(presentation);
+    const rarity = RARITY_ORDER[Math.min(2, Math.floor(rng() * 3))];
+    const dna = patternDnaFromId(id);
+    const baseStats = { ...SPECIES_BASE_STATS[species] };
+    const birthSwing = rollBirthSwing2(rng);
+    const precisionScore = Math.max(0, Math.min(1, 0.35 + rng() * 0.45));
+    return {
+      id,
+      ownerId,
+      gender: sex === "female" ? "F" : "M",
+      species,
+      rarity,
+      baseStats,
+      birthSwing,
+      precisionScore,
+      visualLayers: {
+        l1Body: presentation,
+        l2Fin: dna.slice(0, 4),
+        l3Iridescent: species,
+        l4Opaque: dna.slice(4, 8)
+      },
+      bloodline: { motherId: null, fatherId: null, generation: 0 },
+      activeSkillIds: presentation === "GALAXY" ? ["spark_tail"] : ["scale_guard"]
+    };
+  }
+
+  // src/browser/game.ts
+  var canvas = document.getElementById("aquarium");
+  var ctx = canvas.getContext("2d");
+  var width;
+  var height;
+  var STATE = {
+    ownerId: "player-1",
+    fishes: [],
+    seaweeds: [],
+    bubbles: [],
+    food: [],
+    care: 0,
+    o2: 100,
+    waste: 0,
+    autoFeeder: false,
+    showVitality: true,
+    isZen: false,
+    currentBG: "#1a365d"
+  };
+  var Betta = class {
+    id;
+    dna;
+    type;
+    sex;
+    size;
+    x;
+    y;
+    vx;
+    vy;
+    hunger;
+    age;
+    isRetired;
+    state;
+    target;
+    wagPhase;
+    sprite;
+    /** Schema เดียวกับ Betta Master 2026 — ใช้กับ breedFish */
+    gameFish;
+    constructor(id, type, sex, ownerId, existingFish) {
+      this.gameFish = existingFish ?? createStarterFish(id, ownerId, type, sex);
+      this.id = this.gameFish.id;
+      this.dna = patternDnaFromId(this.id);
+      this.type = speciesToPresentation(this.gameFish.species);
+      this.sex = this.gameFish.gender === "F" ? "female" : "male";
+      this.size = 40 + Math.random() * 15;
+      this.x = Math.random() * window.innerWidth;
+      this.y = window.innerHeight * 0.2 + Math.random() * (window.innerHeight * 0.7);
+      this.vx = (Math.random() - 0.5) * 2;
+      this.vy = (Math.random() - 0.5) * 1;
+      this.hunger = 100;
+      this.age = 0;
+      this.isRetired = false;
+      this.state = "idle";
+      this.target = null;
+      this.wagPhase = Math.random() * Math.PI * 2;
+      this.sprite = document.createElement("canvas");
+      this.sprite.width = 750;
+      this.sprite.height = 750;
+      this.bakeBody();
+    }
+    bakeBody() {
+      const bCtx = this.sprite.getContext("2d");
+      const cx = 375;
+      const cy = 375;
+      const s = 1.5;
+      bCtx.save();
+      bCtx.translate(cx, cy);
+      if (this.sex === "female") bCtx.filter = "saturate(70%) brightness(95%)";
+      bCtx.beginPath();
+      bCtx.ellipse(0, 0, 100 * s, 45 * s, 0, 0, Math.PI * 2);
+      bCtx.fillStyle = "#f0f0f0";
+      bCtx.fill();
+      bCtx.globalCompositeOperation = "source-atop";
+      const colors = this.type === "GALAXY" ? ["#000", "#1a237e", "#4a148c"] : ["#ff6d00", "#212121", "#fff"];
+      for (let i = 0; i < 6; i++) {
+        const val = parseInt(this.dna.slice(i * 2, i * 2 + 2), 10);
+        bCtx.fillStyle = colors[i % 3] + "aa";
+        bCtx.beginPath();
+        bCtx.arc((val - 50) * 2.5, val - 50, 30 + val / 2, 0, Math.PI * 2);
+        bCtx.fill();
+      }
+      if (this.type === "GALAXY") {
+        bCtx.fillStyle = "rgba(255,255,255,0.8)";
+        for (let i = 0; i < 20; i++) bCtx.fillRect(Math.random() * 300 - 150, Math.random() * 150 - 75, 2, 2);
+      }
+      bCtx.globalCompositeOperation = "source-over";
+      bCtx.fillStyle = "black";
+      bCtx.beginPath();
+      bCtx.arc(80 * s, -10 * s, 10, 0, Math.PI * 2);
+      bCtx.fill();
+      bCtx.fillStyle = "white";
+      bCtx.beginPath();
+      bCtx.arc(85 * s, -12 * s, 3, 0, Math.PI * 2);
+      bCtx.fill();
+      bCtx.restore();
+    }
+    update() {
+      this.age += 1e-3;
+      if (this.age > 10) this.isRetired = true;
+      if (this.state === "feeding" && this.target) {
+        const dx = this.target.x - this.x;
+        const dy = this.target.y - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 5) {
+          this.x += dx / dist * 6;
+          this.y += dy / dist * 6;
+          this.vx = dx;
+        } else {
+          this.hunger = 100;
+          this.state = "idle";
+          STATE.care += 2;
+        }
+      } else if (this.state === "romance") {
+        const dx = width / 2 - this.x;
+        const dy = height / 2 - this.y;
+        this.x += dx * 0.02;
+        this.y += dy * 0.02;
+        if (Math.abs(dx) < 20 && Math.random() < 0.05) spawnBubble(this.x, this.y, true);
+      } else {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x < 50 || this.x > width - 50) this.vx *= -1;
+        if (this.y < height * 0.2 || this.y > height - 50) this.vy *= -1;
+        this.hunger -= 0.02;
+      }
+      this.wagPhase += 0.15;
+    }
+    draw() {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      if (this.vx < 0) ctx.scale(-1, 1);
+      const scale = this.size / 150;
+      ctx.scale(scale, scale);
+      const wag = Math.sin(this.wagPhase) * 25;
+      ctx.fillStyle = this.type === "GALAXY" ? "#311b92" : "#d50000";
+      ctx.beginPath();
+      ctx.moveTo(-90, 0);
+      ctx.bezierCurveTo(-150, -80 + wag, -250 + wag, -40, -280, wag);
+      ctx.bezierCurveTo(-250, 40, -150, 80 + wag, -90, 0);
+      ctx.fill();
+      ctx.drawImage(this.sprite, -375, -375);
+      if (this.isRetired) {
+        ctx.fillStyle = "rgba(0,0,0,0.3)";
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 100, 45, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      if (STATE.showVitality && !STATE.isZen) {
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(this.x - 30, this.y - this.size - 10, 60, 5);
+        ctx.fillStyle = this.hunger > 30 ? "#00e676" : "#ff1744";
+        ctx.fillRect(this.x - 30, this.y - this.size - 10, 60 * (this.hunger / 100), 5);
+      }
+    }
+  };
+  function renderEnv(t) {
+    const waterLevel = height * 0.15;
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.fillRect(0, 0, width, waterLevel);
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.beginPath();
+    ctx.moveTo(0, waterLevel);
+    for (let x = 0; x <= width; x += 20) {
+      ctx.lineTo(x, waterLevel + Math.sin(x * 0.01 + t * 2e-3) * 8);
+    }
+    ctx.lineTo(width, 0);
+    ctx.lineTo(0, 0);
+    ctx.fill();
+    STATE.seaweeds.forEach((sw, i) => {
+      const sway = Math.sin(t * 1e-3 + i) * 15;
+      const grad = ctx.createLinearGradient(sw.x, height, sw.x, height - sw.h);
+      grad.addColorStop(0, "#1b5e20");
+      grad.addColorStop(1, "#81c784");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(sw.x, height);
+      for (let j = 0; j < 10; j++) {
+        const y = height - sw.h / 10 * j;
+        const x = sw.x + sway / 10 * j;
+        ctx.lineTo(x + (j % 2 ? 15 : -15), y);
+      }
+      ctx.lineTo(sw.x + sway, height - sw.h);
+      ctx.fill();
+    });
+    STATE.bubbles.forEach((b, i) => {
+      b.y -= b.s;
+      ctx.fillStyle = b.egg ? "#fff9c4" : "rgba(255,255,255,0.3)";
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+      if (b.y < waterLevel) {
+        b.s = 0;
+        if (!b.egg) STATE.bubbles.splice(i, 1);
+      }
+    });
+  }
+  var selectedIndices = [];
+  function initGacha() {
+    const grid = document.getElementById("gacha-grid");
+    for (let i = 0; i < 10; i++) {
+      const div = document.createElement("div");
+      div.className = "gacha-card";
+      const type = Math.random() > 0.5 ? "GALAXY" : "KOI";
+      const sex = Math.random() > 0.5 ? "male" : "female";
+      div.dataset.type = type;
+      div.dataset.sex = sex;
+      div.innerHTML = `<span>${sex === "male" ? "\u2642\uFE0F" : "\u2640\uFE0F"}</span><b>${type}</b>`;
+      div.onclick = () => {
+        if (div.classList.contains("selected")) {
+          div.classList.remove("selected");
+          selectedIndices = selectedIndices.filter((idx) => idx !== i);
+        } else if (selectedIndices.length < 3) {
+          div.classList.add("selected");
+          selectedIndices.push(i);
+        }
+        document.getElementById("start-btn").disabled = selectedIndices.length !== 3;
+      };
+      grid.appendChild(div);
+    }
+  }
+  function startGame() {
+    document.getElementById("gacha-overlay").style.display = "none";
+    const grid = document.getElementById("gacha-grid");
+    selectedIndices.forEach((idx) => {
+      const card = grid.children[idx];
+      const type = card.dataset.type;
+      const sex = card.dataset.sex;
+      const fishId = `fish-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`;
+      STATE.fishes.push(new Betta(fishId, type, sex, STATE.ownerId));
+    });
+    requestAnimationFrame(loop);
+  }
+  function togglePanel(id) {
+    const p = document.getElementById(id + "-panel");
+    const other = document.getElementById((id === "left" ? "right" : "left") + "-panel");
+    other.classList.remove("active");
+    p.classList.toggle("active");
+  }
+  function toggleZen() {
+    STATE.isZen = !STATE.isZen;
+    document.getElementById("hud").style.display = STATE.isZen ? "none" : "flex";
+    document.getElementById("zen-clock").style.display = STATE.isZen ? "block" : "none";
+    document.getElementById("exit-zen").style.display = STATE.isZen ? "block" : "none";
+  }
+  function setBG(c) {
+    document.body.style.background = c;
+    STATE.currentBG = c;
+  }
+  function addSeaweed() {
+    STATE.seaweeds.push({ x: Math.random() * width, h: 150 + Math.random() * 100 });
+  }
+  function spawnBubble(x, y, egg = false) {
+    STATE.bubbles.push({
+      x,
+      y,
+      r: egg ? 4 : Math.random() * 3 + 2,
+      s: Math.random() * 1 + 0.5,
+      egg
+    });
+  }
+  function toggleVitality() {
+    STATE.showVitality = !STATE.showVitality;
+  }
+  function triggerRomance() {
+    const living = STATE.fishes.filter((f) => !f.isRetired);
+    const females = living.filter((f) => f.gameFish.gender === "F");
+    const males = living.filter((f) => f.gameFish.gender === "M");
+    if (females.length < 1 || males.length < 1) {
+      alert("\u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35\u0E1B\u0E25\u0E32\u0E41\u0E21\u0E48 \u2640 \u0E41\u0E25\u0E30\u0E1E\u0E48\u0E2D \u2642 \u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 1 \u0E15\u0E31\u0E27 (\u0E15\u0E32\u0E21 schema Betta Master 2026)");
+      return;
+    }
+    const motherBetta = females[0];
+    const fatherBetta = males[0];
+    motherBetta.state = "romance";
+    fatherBetta.state = "romance";
+    const offspringId = `fry-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    try {
+      const { offspring } = breedFish(
+        { mother: motherBetta.gameFish, father: fatherBetta.gameFish },
+        {
+          offspringId,
+          ownerId: STATE.ownerId,
+          entropy: String(performance.now())
+        }
+      );
+      const presentation = speciesToPresentation(offspring.species);
+      const babySex = offspring.gender === "F" ? "female" : "male";
+      const baby = new Betta(offspring.id, presentation, babySex, STATE.ownerId, offspring);
+      baby.x = width / 2;
+      baby.y = height * 0.45;
+      STATE.fishes.push(baby);
+      const eff = computeEffectiveBaseStats(offspring);
+      const el = document.getElementById("breed-result");
+      if (el) {
+        el.innerHTML = `F${offspring.bloodline.generation} <b>${offspring.species}</b> ${offspring.rarity}<br>
+        HP ${eff.hp.toFixed(0)} ATK ${eff.atk.toFixed(0)} DEF ${eff.def.toFixed(0)} SPD ${eff.spd.toFixed(0)}<br>
+        Precision ${(offspring.precisionScore * 100).toFixed(0)}% \xB7 ${offspring.activeSkillIds.join(", ") || "-"}`;
+      }
+      motherBetta.state = "idle";
+      fatherBetta.state = "idle";
+    } catch (e) {
+      motherBetta.state = "idle";
+      fatherBetta.state = "idle";
+      const msg = e instanceof BreedingIntegrityError ? e.message : e instanceof Error ? e.message : String(e);
+      alert(msg);
+    }
+  }
+  function buyAutoFeeder() {
+    if (STATE.care >= 100) {
+      STATE.care -= 100;
+      STATE.autoFeeder = true;
+      document.getElementById("buy-feeder").disabled = true;
+    } else {
+      alert("\u0E41\u0E15\u0E49\u0E21 Care \u0E44\u0E21\u0E48\u0E1E\u0E2D!");
+    }
+  }
+  function loop(t) {
+    ctx.clearRect(0, 0, width, height);
+    renderEnv(t);
+    STATE.fishes.forEach((f) => {
+      f.update();
+      f.draw();
+      if (STATE.autoFeeder && f.hunger < 90 && f.state === "idle") {
+        f.state = "feeding";
+        f.target = { x: width / 2, y: height * 0.2 };
+      }
+    });
+    document.getElementById("care-val").innerText = String(STATE.care);
+    document.getElementById("o2-val").innerText = String(
+      Math.floor(100 - STATE.fishes.length * 5 + STATE.seaweeds.length * 10)
+    );
+    document.getElementById("waste-val").innerText = String(
+      Math.floor(STATE.fishes.length * 10 - STATE.seaweeds.length * 5)
+    );
+    const now = /* @__PURE__ */ new Date();
+    document.getElementById("zen-clock").innerText = now.getHours().toString().padStart(2, "0") + ":" + now.getMinutes().toString().padStart(2, "0");
+    requestAnimationFrame(loop);
+  }
+  window.addEventListener("resize", () => {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  });
+  window.dispatchEvent(new Event("resize"));
+  initGacha();
+  var clock = document.getElementById("zen-clock");
+  clock.onmousedown = (e) => {
+    const shiftX = e.clientX - clock.getBoundingClientRect().left;
+    const shiftY = e.clientY - clock.getBoundingClientRect().top;
+    document.onmousemove = (ev) => {
+      clock.style.left = ev.pageX - shiftX + "px";
+      clock.style.top = ev.pageY - shiftY + "px";
+    };
+    document.onmouseup = () => {
+      document.onmousemove = null;
+      clock.onmouseup = null;
+    };
+  };
+  var htmlHandlers = globalThis;
+  htmlHandlers.startGame = startGame;
+  htmlHandlers.togglePanel = (id) => togglePanel(id);
+  htmlHandlers.toggleZen = toggleZen;
+  htmlHandlers.setBG = setBG;
+  htmlHandlers.addSeaweed = addSeaweed;
+  htmlHandlers.toggleVitality = toggleVitality;
+  htmlHandlers.triggerRomance = triggerRomance;
+  htmlHandlers.buyAutoFeeder = buyAutoFeeder;
+})();
