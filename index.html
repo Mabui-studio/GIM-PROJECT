@@ -1092,6 +1092,7 @@
             this.bodyW = 52;
             this.visualScaleX = this.vx > 0 ? 1 : -1;
             this.flipScale = this.visualScaleX;
+            this._faceDead = 0.038;
             if (!this.patternName) assignPatternName(this);
             if (parent1 && parent2) {
                 this._parentSameRegion = parent1.baseClass === parent2.baseClass;
@@ -1163,6 +1164,7 @@
             this.visualScaleX =
                 typeof s.visualScaleX === "number" ? s.visualScaleX : typeof s.flipScale === "number" ? s.flipScale : this.vx > 0 ? 1 : -1;
             this.flipScale = this.visualScaleX;
+            this._faceDead = 0.038;
             this._parentSameRegion = s._parentSameRegion;
             this._parentBaseClassA = s._parentBaseClassA;
             this._parentBaseClassB = s._parentBaseClassB;
@@ -1309,16 +1311,20 @@
                 (Math.max(-0.15, Math.min(0.15, (this.vy / (Math.abs(curVx) || 1)) * 0.2)) - this.tilt) * 0.1;
             this.pitchAngle = this.tilt;
 
-            let targetFlip = this.vx > 0 ? 1 : this.vx < 0 ? -1 : this.visualScaleX;
-            var flipLerp = Math.abs(this.vx) > 0.04 ? 0.28 : 0.1;
-            this.visualScaleX += (targetFlip - this.visualScaleX) * flipLerp;
+            var fd = this._faceDead != null ? this._faceDead : 0.038;
+            var wantFace = null;
+            if (this.vx > fd) wantFace = 1;
+            else if (this.vx < -fd) wantFace = -1;
+            if (wantFace !== null) {
+                this.visualScaleX += (wantFace - this.visualScaleX) * 0.12;
+            }
             this.flipScale = this.visualScaleX;
 
-            this.tailPhase += 0.15 + Math.abs(curVx) * 0.05;
+            this.tailPhase += 0.042 + Math.abs(curVx) * 0.016;
             this.wagPhase = this.tailPhase;
             this.turnLag *= 0.92;
 
-            if (Math.random() < 0.01) {
+            if (Math.random() < 0.0025) {
                 this.targetX = Math.random() * canvasCssW;
                 this.targetY = 100 + Math.random() * (canvasCssH - 200);
             }
@@ -1372,18 +1378,17 @@
                 (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") &&
                 (this === breedingAnim.a || this === breedingAnim.b);
             var otherFish = facePartner ? (this === breedingAnim.a ? breedingAnim.b : breedingAnim.a) : null;
-            var swimFacing =
-                Math.abs(this.vx) > 0.012 ? (this.vx > 0 ? 1 : -1) : this.visualScaleX > 0 ? 1 : -1;
+            var swimFacing = this.visualScaleX >= 0 ? 1 : -1;
             var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : swimFacing;
             var flip = rawDraw;
             var displayScaleX = Math.abs(flip) < 0.4 ? (flip > 0 ? 0.4 : -0.4) : flip;
             ctx.rotate(this.tilt + (this.isDead ? 0 : this.turnTilt));
             ctx.scale(displayScaleX * currentSize, currentSize);
 
-            var tailSway = Math.sin(this.tailPhase) * 0.15;
-            var tailFlex = Math.cos(this.tailPhase) * 0.25;
-            var turnEffect = this.vx > 0 ? -this.turnLag : this.turnLag;
-            var wag = Math.sin(this.wagPhase) * 7;
+            var tailSway = Math.sin(this.tailPhase) * 0.1;
+            var tailFlex = Math.cos(this.tailPhase) * 0.16;
+            var turnEffect = this.visualScaleX >= 0 ? -this.turnLag : this.turnLag;
+            var wag = Math.sin(this.wagPhase) * 4;
             var tailPivotX = 280;
             var tailPivotY = 248;
 
@@ -1545,9 +1550,9 @@
                     if (d < 55 && d > 1) {
                         var nx = (p.x - fish.x) / d;
                         var ny = (p.y - fish.y) / d;
-                        var push = (55 - d) * 0.018;
-                        p.x += nx * push + fish.vx * 0.12;
-                        p.y += ny * push + fish.vy * 0.08;
+                        var push = (55 - d) * 0.006;
+                        p.x += nx * push + fish.vx * 0.035;
+                        p.y += ny * push + fish.vy * 0.025;
                     }
                 }
             });
@@ -1598,7 +1603,7 @@
         draw() {
             var pts = this.points;
             if (!pts || pts.length < 12) return;
-            var amp = 5;
+            var amp = 15;
             var teeth = 0.85;
 
             ctx.beginPath();
@@ -1688,7 +1693,8 @@
             return sw;
         }
         if (raw && raw.x != null && raw.y != null) {
-            return new Seaweed(raw.x, raw.y, 150 + (raw.seed != null ? (raw.seed % 80) : 40), null);
+            var by = typeof canvasCssH !== "undefined" ? Math.min(raw.y, canvasCssH - 10) : raw.y;
+            return new Seaweed(raw.x, by, 150 + (raw.seed != null ? (raw.seed % 80) : 40), null);
         }
         return null;
     }
@@ -1864,7 +1870,7 @@
         if (breedingAnim) return;
 
         if (currentMode === "decor") {
-            decors.push(new Seaweed(e.clientX, e.clientY, 150 + Math.random() * 60, null));
+            decors.push(new Seaweed(e.clientX, canvasCssH - 10, 150 + Math.random() * 60, null));
             cancelMode();
             db.gold -= 300;
             saveGame();
@@ -2096,12 +2102,15 @@
         }
         if (db.autoBreedGenetics) {
             db.autoBreedCooldown = db.timer + 3600;
+        } else {
+            db.autoBreedCooldown = 0;
         }
         saveGame();
     }
 
     function stepAutoBreedGenetics() {
-        if (!db.autoBreedGenetics || breedingAnim || fishes.length >= MAX_FISH) return;
+        if (!db.autoBreedGenetics) return;
+        if (breedingAnim || fishes.length >= MAX_FISH) return;
         if (db.timer < db.autoBreedCooldown) return;
         var females = fishes.filter(function (f) {
             return (
@@ -2438,6 +2447,7 @@
             db.lastAutoFeedMs = payload.db.lastAutoFeedMs || 0;
             db.autoBreedGenetics = !!payload.db.autoBreedGenetics;
             db.autoBreedCooldown = payload.db.autoBreedCooldown || 0;
+            if (!db.autoBreedGenetics) db.autoBreedCooldown = 0;
             db.autoBreedIntervalFrames = payload.db.autoBreedIntervalFrames || 10800;
             if (payload.waterState) {
                 waterState.theme = payload.waterState.theme || "auto";
