@@ -50,14 +50,26 @@
         #notice { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #fff; padding: 10px 20px; border-radius: 20px; font-weight: bold; display: none; pointer-events: auto; z-index: 50; }
 
         /* Zen Clock Widget */
-        #zen-widget { position: absolute; top: 100px; left: 100px; background: rgba(15, 23, 42, 0.7); color: white; padding: 15px 25px; border-radius: 15px; backdrop-filter: blur(5px); display: none; cursor: grab; pointer-events: auto; user-select: none; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 100; text-align: center; }
-        #zen-widget:active { cursor: grabbing; }
+        #zen-widget { position: absolute; top: 100px; left: 100px; background: rgba(15, 23, 42, 0.7); color: white; padding: 15px 25px; border-radius: 15px; backdrop-filter: blur(5px); display: none; cursor: default; pointer-events: none; user-select: none; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 100; text-align: center; }
+        body.zen-mode #aquarium { z-index: 40; }
+        body.zen-mode #zen-widget { z-index: 41; }
         #zen-time { font-size: 2.5rem; font-weight: 300; font-family: monospace; letter-spacing: 2px; }
         #zen-stats { font-size: 0.8rem; color: #94a3b8; margin-top: 5px; display: flex; justify-content: space-around; }
 
         /* Quick Toggles */
         .tools-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; pointer-events: auto; z-index: 11; }
         .tool-btn { background: rgba(255,255,255,0.9); border: none; padding: 8px 15px; border-radius: 20px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
+
+        /* การ์ดปลา + โมดัลหยุดเกม */
+        #fish-card-strip { position: fixed; bottom: 0; left: 0; right: 0; z-index: 12; display: flex; gap: 8px; padding: 10px 12px; overflow-x: auto; pointer-events: auto; background: linear-gradient(transparent, rgba(15,23,42,0.92)); max-height: 120px; align-items: flex-end; }
+        .fish-mini-card { flex: 0 0 auto; width: 72px; height: 88px; border-radius: 10px; background: #fff; border: 2px solid #e2e8f0; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.65rem; color: #334155; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: transform 0.15s; }
+        .fish-mini-card:hover { transform: translateY(-3px); border-color: var(--accent); }
+        .fish-mini-card .swatch { width: 36px; height: 36px; border-radius: 50%; border: 2px solid #cbd5e1; margin-bottom: 4px; }
+        #fish-modal-overlay { display: none; position: fixed; inset: 0; z-index: 20000; background: rgba(0,0,0,0.55); pointer-events: auto; align-items: center; justify-content: center; }
+        #fish-modal-overlay.open { display: flex; }
+        #fish-modal { background: var(--bg-ui); max-width: 420px; width: 90%; max-height: 85vh; overflow-y: auto; border-radius: 12px; padding: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.4); position: relative; }
+        #fish-modal-close { position: absolute; top: 12px; right: 12px; background: #ef4444; color: white; border: none; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 1.2rem; line-height: 1; }
+        html:fullscreen body { background: #0f172a; }
     </style>
 </head>
 <body id="tank-body">
@@ -125,6 +137,16 @@
     <div id="zen-widget">
         <div id="zen-time">12:00</div>
         <div id="zen-stats"><span>🌿 <span id="zen-o2">100</span>%</span> <span>💧 <span id="zen-waste">0</span>%</span></div>
+        <p style="font-size:0.7rem;color:#94a3b8;margin-top:8px;">แตะที่ตู้น้ำเพื่อออก</p>
+    </div>
+
+    <div id="fish-card-strip" class="pointer-events-auto" aria-label="การ์ดปลา"></div>
+
+    <div id="fish-modal-overlay" onclick="if(event.target===this)closeFishModal()">
+        <div id="fish-modal" onclick="event.stopPropagation()">
+            <button type="button" id="fish-modal-close" onclick="closeFishModal()">&times;</button>
+            <div id="fish-modal-body"></div>
+        </div>
     </div>
 
 <script>
@@ -324,6 +346,38 @@
     var REGION_TO_SPECIES = { ภาคกลาง: "Central", มหาชัย: "Mahachai", อีสาน: "Isan", ภาคใต้: "South" };
     var DEMO_RARITY_TO_ORDER = { common: "Common", uc: "UC", rare: "R", sr: "SR", ur: "UR", god: "GOD" };
 
+    /** สีพิเศษ — ไม่ใช้ลาย Koi/Galaxy; คอนทราสต์กับพื้นหลังน้ำ */
+    var SPECIAL_PALETTE = [
+        { name: "แดงเข้ม", body: "#7f1d1d", tail: "#991b1b", edge: "#fecaca" },
+        { name: "น้ำเงิน", body: "#1e3a8a", tail: "#2563eb", edge: "#bfdbfe" },
+        { name: "เขียวเข้ม", body: "#14532d", tail: "#166534", edge: "#bbf7d0" },
+        { name: "เหลืองเข้ม", body: "#854d0e", tail: "#a16207", edge: "#fef08a" },
+        { name: "ดำ", body: "#171717", tail: "#262626", edge: "#a3a3a3" },
+        { name: "ขาว", body: "#f8fafc", tail: "#e2e8f0", edge: "#64748b" },
+        { name: "เทา", body: "#475569", tail: "#64748b", edge: "#f1f5f9" },
+    ];
+
+    function paletteIndexFromName(name) {
+        for (var i = 0; i < SPECIAL_PALETTE.length; i++) {
+            if (SPECIAL_PALETTE[i].name === name) return i;
+        }
+        return 0;
+    }
+
+    function assignPaletteToFish(fish, preferredName) {
+        var rng = createRng([fish.id, "palette"]);
+        var idx =
+            preferredName != null
+                ? paletteIndexFromName(preferredName)
+                : Math.floor(rng() * SPECIAL_PALETTE.length);
+        var pal = SPECIAL_PALETTE[idx];
+        fish.paletteIndex = idx;
+        fish.paletteName = pal.name;
+        fish.color = fish.sex === "F" ? desaturate(pal.body, 0.22) : pal.body;
+        fish.tailColor = fish.sex === "F" ? desaturate(pal.tail, 0.22) : pal.tail;
+        fish.edgeColor = pal.edge;
+    }
+
     function patternDnaFromId(id) {
         var h = 0;
         var str = String(id);
@@ -336,7 +390,7 @@
         var rarity = DEMO_RARITY_TO_ORDER[fish.rarity.id] || "Common";
         var rng = createRng(["maj", fish.id, OWNER_ID]);
         var dna = patternDnaFromId(fish.id);
-        var presentation = fish.patternType === "Galaxy" ? "GALAXY" : "KOI";
+        var palName = fish.paletteName || SPECIAL_PALETTE[0].name;
         return {
             id: fish.id,
             ownerId: OWNER_ID,
@@ -347,13 +401,13 @@
             birthSwing: { hp: 0.9 + rng() * 0.2, atk: 0.9 + rng() * 0.2, def: 0.9 + rng() * 0.2, spd: 0.9 + rng() * 0.2 },
             precisionScore: Math.max(0, Math.min(1, 0.35 + rng() * 0.45)),
             visualLayers: {
-                l1Body: presentation,
+                l1Body: palName,
                 l2Fin: dna.slice(0, 4),
                 l3Iridescent: species,
                 l4Opaque: dna.slice(4, 8),
             },
             bloodline: { motherId: null, fatherId: null, generation: 0 },
-            activeSkillIds: presentation === "GALAXY" ? ["spark_tail"] : ["scale_guard"],
+            activeSkillIds: ["fin_guard"],
         };
     }
 
@@ -415,6 +469,10 @@
     let currentMode = "normal"; // 'normal', 'decor', 'breeding'
     let isZenMode = false;
     let showHealthBars = false;
+    let gamePaused = false;
+    /** @type {{ phase: string, t: number, a: MajesticBetta, b: MajesticBetta, startAx: number, startAy: number, startBx: number, startBy: number, mx: number, my: number } | null} */
+    let breedingAnim = null;
+    var floatingHearts = [];
 
     const MAX_FISH = 10;
     const DAY_FRAMES = 3600;
@@ -431,7 +489,6 @@
         { id: "god", name: "GOD", prob: 1.0, multi: 2.5 },
     ];
     const REGIONS = ["ภาคกลาง", "มหาชัย", "อีสาน", "ภาคใต้"];
-    const PATTERNS = ["Solid", "Koi", "Galaxy", "Dragon"];
 
     const BREEDS = {
         VEILTAIL: [
@@ -474,8 +531,6 @@
         b = Math.round(b + amount * (l - b));
         return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
     }
-    const RAND_HEX = () => "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0");
-
     function getRandomRarity() {
         let r = Math.random();
         for (let item of RARITIES) {
@@ -511,7 +566,7 @@
                     }) || "ภาคกลาง";
                     var ro = RARITY_ORDER.indexOf(this.gameFish.rarity);
                     this.rarity = RARITIES[Math.min(RARITIES.length - 1, Math.max(0, ro))];
-                    this.patternType = this.gameFish.visualLayers.l1Body === "GALAXY" ? "Galaxy" : "Koi";
+                    this.patternType = this.gameFish.visualLayers.l1Body || SPECIAL_PALETTE[0].name;
                 } catch (err) {
                     console.warn(err);
                     this._initDemoGenetics(parent1, parent2, isWild);
@@ -526,18 +581,13 @@
 
             this.vitality = 100;
             this.hunger = 0;
-
             if (!this.baseClass) this.baseClass = REGIONS[Math.floor(Math.random() * REGIONS.length)];
             if (!this.rarity) this.rarity = parent1 ? RARITIES[Math.min(5, Math.max(0, Math.floor((RARITIES.indexOf(parent1.rarity) + RARITIES.indexOf(parent2.rarity)) / 2) + (Math.random() > 0.8 ? 1 : 0)))] : getRandomRarity();
-            if (!this.patternType) this.patternType = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
+            if (!this.patternType) this.patternType = SPECIAL_PALETTE[Math.floor(Math.random() * SPECIAL_PALETTE.length)].name;
 
             if (!this.gameFish) this.gameFish = buildGameFishForMajestic(this);
 
-            this.rawColor = parent1 ? RAND_HEX() : RAND_HEX();
-            this.rawTail = parent1 ? RAND_HEX() : RAND_HEX();
-            this.color = this.sex === "F" ? desaturate(this.rawColor, 0.3) : this.rawColor;
-            this.tailColor = this.sex === "F" ? desaturate(this.rawTail, 0.3) : this.rawTail;
-            this.patternColor = RAND_HEX();
+            assignPaletteToFish(this, this.patternType);
 
             this.breedKey = Math.random() > 0.7 ? "HALFMOON" : "VEILTAIL";
             this.breedObj = BREEDS[this.breedKey];
@@ -552,13 +602,15 @@
             this.wagPhase = Math.random() * Math.PI * 2;
             this.glideTimer = 0;
             this.selected = false;
+            this.breedingLocked = false;
+            this.breedCooldownUntil = 0;
         }
 
         _initDemoGenetics(parent1, parent2, isWild) {
             this.sex = Math.random() > 0.5 ? "M" : "F";
             this.baseClass = REGIONS[Math.floor(Math.random() * REGIONS.length)];
             this.rarity = parent1 ? RARITIES[Math.min(5, Math.max(0, Math.floor((RARITIES.indexOf(parent1.rarity) + RARITIES.indexOf(parent2.rarity)) / 2) + (Math.random() > 0.8 ? 1 : 0)))] : getRandomRarity();
-            this.patternType = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
+            this.patternType = SPECIAL_PALETTE[Math.floor(Math.random() * SPECIAL_PALETTE.length)].name;
         }
 
         calcPrice() {
@@ -567,6 +619,8 @@
 
         update() {
             if (this.isDead) return;
+            if (gamePaused) return;
+            if (breedingAnim && (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") && (this === breedingAnim.a || this === breedingAnim.b)) return;
 
             this.age += 1 / DAY_FRAMES;
             if (this.age >= RETIRE_AGE) this.isRetired = true;
@@ -583,6 +637,7 @@
                     this.isDead = true;
                     fishes = fishes.filter((f) => f !== this);
                     updateUI();
+                    renderFishCards();
                     return;
                 }
             }
@@ -680,27 +735,14 @@
 
             ctx.fillStyle = this.color;
             ctx.fill(new Path2D(BODY_PATH));
-
             ctx.save();
-            ctx.clip(new Path2D(BODY_PATH));
-            ctx.globalCompositeOperation = "source-atop";
-            if (this.patternType === "Koi") {
-                let grad = ctx.createRadialGradient(200, 250, 10, 200, 250, 100);
-                grad.addColorStop(0, this.patternColor);
-                grad.addColorStop(1, "transparent");
-                ctx.fillStyle = grad;
-                ctx.fill(new Path2D(BODY_PATH));
-            } else if (this.patternType === "Galaxy") {
-                ctx.fillStyle = this.patternColor;
-                for (let k = 0; k < 15; k++) {
-                    ctx.beginPath();
-                    ctx.arc(150 + Math.random() * 100, 200 + Math.random() * 50, Math.random() * 4, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
+            ctx.strokeStyle = this.edgeColor || "#ffffff";
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.45;
+            ctx.stroke(new Path2D(BODY_PATH));
             ctx.restore();
 
-            ctx.fillStyle = "white";
+            ctx.fillStyle = this.paletteName === "ขาว" || this.paletteName === "เหลืองเข้ม" ? "#1e293b" : "#ffffff";
             ctx.fill(new Path2D(EYE_PATH));
             ctx.fillStyle = "black";
             ctx.beginPath();
@@ -712,21 +754,31 @@
     }
 
     class Egg {
-        constructor(x, y, p1, p2) {
+        constructor(x, y, p1, p2, fromBreed) {
             this.x = x;
             this.y = y;
             this.p1 = p1;
             this.p2 = p2;
             this.timer = 0;
             this.hatched = false;
+            this.fromBreed = !!fromBreed;
+            if (this.fromBreed && this.p1 && this.p2) {
+                this.p1.breedingLocked = true;
+                this.p2.breedingLocked = true;
+            }
         }
         update() {
+            if (gamePaused) return;
             if (this.y > WATERLINE + 10) this.y -= 1.5;
             else this.x += Math.sin(db.timer * 0.05) * 0.2;
 
             this.timer += db.o2 / 100;
             if (this.timer >= DAY_FRAMES * 0.6) {
                 this.hatched = true;
+                if (this.fromBreed && this.p1 && this.p2) {
+                    this.p1.breedingLocked = false;
+                    this.p2.breedingLocked = false;
+                }
                 if (fishes.length < MAX_FISH) {
                     var mother = this.p1.sex === "F" ? this.p1 : this.p2;
                     var father = this.p1.sex === "M" ? this.p1 : this.p2;
@@ -735,6 +787,7 @@
                         father.gameFish = buildGameFishForMajestic(father);
                     }
                     fishes.push(new MajesticBetta(this.p1, this.p2, false));
+                    renderFishCards();
                 }
             }
         }
@@ -756,8 +809,45 @@
         }
     }
 
+    function startBreedingSequence(fa, fb) {
+        var mother = fa.sex === "F" ? fa : fb;
+        var father = fa.sex === "M" ? fa : fb;
+        if (mother !== fa && mother !== fb) return;
+        mother.selected = false;
+        father.selected = false;
+        selectedFishes = [];
+        cancelMode();
+        breedingAnim = {
+            phase: "approach",
+            t: 0,
+            a: mother,
+            b: father,
+            startAx: mother.x,
+            startAy: mother.y,
+            startBx: father.x,
+            startBy: father.y,
+            mx: (mother.x + father.x) / 2,
+            my: (mother.y + father.y) / 2,
+        };
+    }
+
+    var zenExitHandler = function (e) {
+        if (!isZenMode || e.target !== canvas) return;
+        e.preventDefault();
+        toggleZenMode();
+    };
+
+    canvas.addEventListener("click", zenExitHandler);
+    canvas.addEventListener("touchend", function (e) {
+        if (!isZenMode) return;
+        e.preventDefault();
+        zenExitHandler(e);
+    }, { passive: false });
+
     canvas.addEventListener("mousedown", (e) => {
         if (isZenMode) return;
+        if (gamePaused) return;
+        if (breedingAnim) return;
 
         if (currentMode === "decor") {
             decors.push({ x: e.clientX, y: e.clientY });
@@ -778,8 +868,16 @@
                     alert("ยังไม่พร้อมผสม!");
                     return;
                 }
+                if (clickedFish.breedingLocked) {
+                    alert("ปลาตัวนี้รอไข่ฟักอยู่ — ผสมใหม่ไม่ได้ชั่วคราว");
+                    return;
+                }
 
                 if (selectedFishes.length === 0) {
+                    if (clickedFish.breedingLocked) {
+                        alert("ปลาตัวนี้รอไข่ฟักอยู่");
+                        return;
+                    }
                     clickedFish.selected = true;
                     selectedFishes.push(clickedFish);
                 } else if (selectedFishes.length === 1) {
@@ -789,12 +887,15 @@
                     } else if (selectedFishes[0].sex === clickedFish.sex) {
                         alert("ต้องต่างเพศกัน!");
                     } else {
+                        if (db.timer < clickedFish.breedCooldownUntil || db.timer < selectedFishes[0].breedCooldownUntil) {
+                            alert("ปลาอย่างน้อยหนึ่งตัวยังคูลดาวน์ผสมพันธุ์อยู่ (จนกว่าไข่จะฟัก)");
+                            return;
+                        }
                         clickedFish.selected = true;
                         selectedFishes.push(clickedFish);
-                        setTimeout(() => {
-                            eggs.push(new Egg(selectedFishes[0].x, selectedFishes[0].y, selectedFishes[0], selectedFishes[1]));
-                            cancelMode();
-                        }, 500);
+                        var fa = selectedFishes[0];
+                        var fb = selectedFishes[1];
+                        startBreedingSequence(fa, fb);
                     }
                 }
             } else {
@@ -816,22 +917,7 @@
         }
     });
 
-    let zenDrag = false,
-        zx,
-        zy;
     const zw = document.getElementById("zen-widget");
-    zw.addEventListener("mousedown", (e) => {
-        zenDrag = true;
-        zx = e.offsetX;
-        zy = e.offsetY;
-    });
-    window.addEventListener("mouseup", () => (zenDrag = false));
-    window.addEventListener("mousemove", (e) => {
-        if (zenDrag) {
-            zw.style.left = e.clientX - zx + "px";
-            zw.style.top = e.clientY - zy + "px";
-        }
-    });
 
     function togglePanel(id) {
         let p = document.getElementById(id);
@@ -866,7 +952,7 @@
             "</span> / " +
             f.gameFish.rarity +
             "<br>" +
-            "<b>ลวดลาย:</b> " +
+            "<b>สีพิเศษ:</b> " +
             f.patternType +
             "<br>" +
             "<b>อายุ:</b> " +
@@ -908,9 +994,17 @@
     }
     function toggleZenMode() {
         isZenMode = !isZenMode;
+        document.body.classList.toggle("zen-mode", isZenMode);
         document.getElementById("ui-wrapper").style.opacity = isZenMode ? "0" : "1";
         zw.style.display = isZenMode ? "block" : "none";
         document.getElementById("ui-wrapper").style.pointerEvents = isZenMode ? "none" : "";
+        document.getElementById("fish-card-strip").style.display = isZenMode ? "none" : "flex";
+        if (isZenMode) {
+            var el = document.documentElement;
+            if (el.requestFullscreen) el.requestFullscreen().catch(function () {});
+        } else if (document.fullscreenElement) {
+            document.exitFullscreen().catch(function () {});
+        }
     }
 
     function enterBreedingMode() {
@@ -943,6 +1037,7 @@
             fishes = fishes.filter((f) => f !== selectedFishes[0]);
             selectedFishes = [];
             document.getElementById("panel-left").classList.remove("open");
+            renderFishCards();
         }
     }
     function buyFood() {
@@ -959,6 +1054,7 @@
         if (db.gold >= 500) {
             db.gold -= 500;
             fishes.push(new MajesticBetta(null, null, true));
+            renderFishCards();
         }
     }
     function buyAutoFeeder() {
@@ -967,6 +1063,129 @@
             db.hasAutoFeeder = true;
             document.getElementById("btn-autofeeder").innerText = "✅ มีเครื่องให้อาหารแล้ว";
             document.getElementById("btn-autofeeder").disabled = true;
+        }
+    }
+
+    function openFishModal(f) {
+        if (!f.gameFish) f.gameFish = buildGameFishForMajestic(f);
+        var eff = computeEffectiveBaseStats(f.gameFish);
+        gamePaused = true;
+        document.getElementById("fish-modal-body").innerHTML =
+            '<h3 style="margin-top:0;color:var(--primary);">' +
+            f.id +
+            "</h3>" +
+            '<p style="margin:0 0 12px;"><b>เพศ:</b> ' +
+            (f.sex === "M" ? "♂ ผู้" : "♀ เมีย") +
+            " · <b>สี:</b> " +
+            f.paletteName +
+            "</p>" +
+            '<div class="info-card" style="margin:0;">' +
+            "<b>สายภูมิภาค:</b> " +
+            f.baseClass +
+            "<br><b>Betta Master species:</b> " +
+            f.gameFish.species +
+            "<br><b>Rarity:</b> " +
+            f.rarity.name +
+            " / " +
+            f.gameFish.rarity +
+            "<br><b>อายุ:</b> " +
+            f.age.toFixed(1) +
+            " วัน" +
+            (f.isRetired ? " <span style='color:red'>(Retired)</span>" : "") +
+            "<br><b>Vitality:</b> " +
+            f.vitality.toFixed(0) +
+            "% · <b>หิว:</b> " +
+            f.hunger.toFixed(0) +
+            "%<br><b>สู้ HP/ATK/DEF/SPD:</b> " +
+            Math.round(eff.hp) +
+            " / " +
+            Math.round(eff.atk) +
+            " / " +
+            Math.round(eff.def) +
+            " / " +
+            Math.round(eff.spd) +
+            "<br><b>Precision:</b> " +
+            (f.gameFish.precisionScore * 100).toFixed(0) +
+            "% · <b>รุ่น F</b>" +
+            f.gameFish.bloodline.generation +
+            "</div>";
+        document.getElementById("fish-modal-overlay").classList.add("open");
+    }
+
+    function closeFishModal() {
+        gamePaused = false;
+        document.getElementById("fish-modal-overlay").classList.remove("open");
+    }
+
+    function renderFishCards() {
+        var strip = document.getElementById("fish-card-strip");
+        strip.innerHTML = "";
+        fishes.forEach(function (f) {
+            var card = document.createElement("div");
+            card.className = "fish-mini-card";
+            card.title = f.id + " · " + f.paletteName;
+            card.innerHTML =
+                '<div class="swatch" style="background:#f59e0b;" onclick="event.stopPropagation()"></div><span>' +
+                f.id.replace("BTA-", "") +
+                "</span>";
+            card.querySelector(".swatch").style.background = f.color || "#64748b";
+            card.onclick = function () {
+                openFishModal(f);
+            };
+            strip.appendChild(card);
+        });
+    }
+
+    function stepBreedingAnim() {
+        if (!breedingAnim) return;
+        var a = breedingAnim.a;
+        var b = breedingAnim.b;
+        breedingAnim.t++;
+        if (breedingAnim.phase === "approach") {
+            var dur = 90;
+            var u = Math.min(1, breedingAnim.t / dur);
+            a.x = breedingAnim.startAx + (breedingAnim.mx - breedingAnim.startAx) * u;
+            a.y = breedingAnim.startAy + (breedingAnim.my - breedingAnim.startAy) * u;
+            b.x = breedingAnim.startBx + (breedingAnim.mx - breedingAnim.startBx) * u;
+            b.y = breedingAnim.startBy + (breedingAnim.my - breedingAnim.startBy) * u;
+            if (u >= 1) {
+                breedingAnim.phase = "kiss";
+                breedingAnim.t = 0;
+                for (var h = 0; h < 8; h++) {
+                    floatingHearts.push({
+                        x: breedingAnim.mx,
+                        y: breedingAnim.my,
+                        vx: (Math.random() - 0.5) * 3,
+                        vy: -2 - Math.random() * 2,
+                        life: 50,
+                    });
+                }
+            }
+        } else if (breedingAnim.phase === "kiss") {
+            if (breedingAnim.t >= 45) {
+                eggs.push(new Egg(breedingAnim.mx, breedingAnim.my + 20, a, b, true));
+                a.breedCooldownUntil = db.timer + Math.floor(DAY_FRAMES * 0.6);
+                b.breedCooldownUntil = db.timer + Math.floor(DAY_FRAMES * 0.6);
+                breedingAnim = null;
+            }
+        }
+    }
+
+    function drawFloatingHearts() {
+        for (var i = floatingHearts.length - 1; i >= 0; i--) {
+            var h = floatingHearts[i];
+            if (!gamePaused) {
+                h.x += h.vx;
+                h.y += h.vy;
+                h.life--;
+            }
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, h.life / 20);
+            ctx.fillStyle = "#f43f5e";
+            ctx.font = "bold 24px monospace";
+            ctx.fillText("♥", h.x, h.y);
+            ctx.restore();
+            if (h.life <= 0) floatingHearts.splice(i, 1);
         }
     }
 
@@ -986,6 +1205,7 @@
     function init() {
         setWaterTheme("auto");
         for (let i = 0; i < 3; i++) fishes.push(new MajesticBetta(null, null, true));
+        renderFishCards();
         loop();
     }
 
@@ -1017,12 +1237,17 @@
 
     function loop() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        db.timer++;
 
-        db.o2 = Math.min(100, Math.max(0, 100 - fishes.length * 5 + decors.length * 15));
-        db.waste = Math.min(100, Math.max(0, db.waste + fishes.length * 0.01 - decors.length * 0.05));
+        if (!gamePaused) stepBreedingAnim();
 
-        if (db.hasAutoFeeder && db.timer % 60 === 0 && db.foodCount > 0) {
+        if (!gamePaused) {
+            db.timer++;
+
+            db.o2 = Math.min(100, Math.max(0, 100 - fishes.length * 5 + decors.length * 15));
+            db.waste = Math.min(100, Math.max(0, db.waste + fishes.length * 0.01 - decors.length * 0.05));
+        }
+
+        if (!gamePaused && db.hasAutoFeeder && db.timer % 60 === 0 && db.foodCount > 0) {
             let hungryFish = fishes.find((f) => f.hunger >= 90);
             if (hungryFish) {
                 db.foodCount--;
@@ -1033,23 +1258,30 @@
         drawWaterline();
         drawDecors();
 
-        foods = foods.filter((f) => !f.eaten && f.y < canvas.height);
-        ctx.fillStyle = "#e67e22";
-        foods.forEach((f) => {
-            f.y += 2.5;
-            ctx.beginPath();
-            ctx.arc(f.x, f.y, 5, 0, Math.PI * 2);
-            ctx.fill();
-        });
+        if (!gamePaused) {
+            foods = foods.filter((f) => !f.eaten && f.y < canvas.height);
+            ctx.fillStyle = "#e67e22";
+            foods.forEach((f) => {
+                f.y += 2.5;
+                ctx.beginPath();
+                ctx.arc(f.x, f.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
 
-        eggs = eggs.filter((e) => !e.hatched);
-        eggs.forEach((e) => {
-            e.update();
-            e.draw();
-        });
+            eggs = eggs.filter((e) => !e.hatched);
+            eggs.forEach((e) => {
+                e.update();
+                e.draw();
+            });
+
+            fishes.forEach((f) => {
+                f.update();
+            });
+        }
+
+        drawFloatingHearts();
 
         fishes.forEach((f) => {
-            f.update();
             f.draw();
         });
 
@@ -1075,6 +1307,7 @@
     window.toggleZenMode = toggleZenMode;
     window.enterBreedingMode = enterBreedingMode;
     window.changeBG = changeBG;
+    window.closeFishModal = closeFishModal;
 
     init();
 })();
