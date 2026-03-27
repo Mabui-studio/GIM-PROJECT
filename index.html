@@ -95,6 +95,7 @@
             <hr style="margin:20px 0; border:0; border-top:1px solid #e2e8f0;">
             <h3>ศูนย์เพาะพันธุ์</h3>
             <button class="action-btn" id="breed-mode-btn" style="background:#ec4899;" onclick="enterBreedingMode()">💕 โหมดผสมพันธุ์</button>
+            <button type="button" class="action-btn" id="btn-auto-breed" style="background:#a855f7;" onclick="toggleAutoBreedGenetics()">🧬 ผสมอัตโนมัติ: ปิด</button>
             <p style="font-size: 0.75rem; color: #64748b;">* ปลาอายุ &gt; 10 วันจะเกษียณ (Retire) ผสมไม่ได้ · ใช้อัลกอริทึม Betta Master 2026 ตอนไข่ฟัก</p>
         </div>
 
@@ -548,7 +549,7 @@
             extraSkills: [],
             gender: fish.sex,
             tailType: tailLabelFromBreedKey(fish.breedKey),
-            pattern: "Solid",
+            pattern: fish.patternName || "Solid",
             stamina: stamina,
             maxStamina: maxStamina,
             inHospital: false,
@@ -572,6 +573,9 @@
         { key: "mint", label: "มิ้นต์", dark: "#8ec5b8", light: "#dff5ef", theme: "custom" },
         { key: "lav", label: "ลาเวนเดอร์", dark: "#b8a8d8", light: "#ede8f7", theme: "custom" },
         { key: "peach", label: "พีช", dark: "#e8b8a8", light: "#fff0eb", theme: "custom" },
+        { key: "deepblue", label: "น้ำเงินเข้มอ่อน", dark: "#3d5a85", light: "#6b8cbe", theme: "custom" },
+        { key: "deepgray", label: "เทาเข้ม", dark: "#4a5568", light: "#718096", theme: "custom" },
+        { key: "indigo", label: "ครามเข้ม", dark: "#2c3d6b", light: "#4a5f9a", theme: "custom" },
     ];
     function hexToRgb(hex) {
         var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -665,7 +669,17 @@
     const ctx = canvas.getContext("2d");
 
     // --- DB & Game State ---
-    let db = { gold: 5000, foodCount: 15, timer: 0, hasAutoFeeder: false, o2: 100, waste: 0, lastAutoFeedMs: 0 };
+    let db = {
+        gold: 5000,
+        foodCount: 15,
+        timer: 0,
+        hasAutoFeeder: false,
+        o2: 100,
+        waste: 0,
+        lastAutoFeedMs: 0,
+        autoBreedGenetics: false,
+        autoBreedCooldown: 0,
+    };
     let fishes = [],
         foods = [],
         decors = [],
@@ -719,6 +733,89 @@
     };
     const BODY_PATH = "M312.2,319.2h-180c-40.5,0-99-32.7-99-73.2v-1.5c0-40.5,58.7-73.2,99-73.2h180c40.5,0,105.5,32.7,105.5,73.2v1.5C417.8,286.5,352.7,319.2,312.2,319.2z";
     const EYE_PATH = "M102.6,215.7c0,18.7-15.2,33.9-33.9,33.9s-33.9-15.2-33.9-33.9s15.2-33.9,33.9-33.9S102.6,197,102.6,215.7z";
+
+    var PATTERN_NAMES = ["Solid", "Marble", "Galaxy", "Koi", "Neon"];
+    function assignPatternName(fish) {
+        var rng = createRng([fish.id || "x", "pattern"]);
+        var t = (GAME_RANK_BY_LETTER[fish.gameRarityLetter] || 1) - 1;
+        var u = rng();
+        if (u < 0.55 - t * 0.08) fish.patternName = "Solid";
+        else if (u < 0.78) fish.patternName = "Marble";
+        else if (u < 0.9) fish.patternName = "Galaxy";
+        else if (u < 0.97) fish.patternName = "Koi";
+        else fish.patternName = "Neon";
+        fish.patternSeed = hashStringToSeed(String(fish.id) + "|pat");
+    }
+    /** วาดลายทับลำตัว (clip ด้วย BODY_PATH) — เรียกในระบบพิกัดปลา หลังเติมสีตัว */
+    function drawFishPattern(ctx, fish) {
+        if (!fish.patternName || fish.patternName === "Solid") return;
+        ctx.save();
+        ctx.clip(new Path2D(BODY_PATH));
+        var seed = fish.patternSeed || 12345;
+        var rnd = function () {
+            seed = (seed * 1664525 + 1013904223) >>> 0;
+            return (seed % 1000) / 1000;
+        };
+        var cx = 200,
+            cy = 260;
+        if (fish.patternName === "Marble") {
+            for (var m = 0; m < 7; m++) {
+                ctx.fillStyle = "rgba(" + Math.floor(40 + rnd() * 80) + "," + Math.floor(40 + rnd() * 100) + "," + Math.floor(60 + rnd() * 120) + "," + (0.12 + rnd() * 0.18) + ")";
+                ctx.beginPath();
+                ctx.ellipse(cx + (rnd() - 0.5) * 120, cy + (rnd() - 0.5) * 70, 18 + rnd() * 35, 14 + rnd() * 25, rnd() * Math.PI, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        } else if (fish.patternName === "Galaxy") {
+            var g = ctx.createRadialGradient(cx - 30, cy - 40, 5, cx, cy, 140);
+            g.addColorStop(0, "rgba(99, 102, 241, 0.35)");
+            g.addColorStop(0.5, "rgba(30, 27, 75, 0.2)");
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.fill(new Path2D(BODY_PATH));
+            ctx.fillStyle = "rgba(255,255,255,0.5)";
+            for (var s = 0; s < 45; s++) {
+                ctx.globalAlpha = 0.15 + rnd() * 0.35;
+                ctx.beginPath();
+                ctx.arc(cx + (rnd() - 0.5) * 100, cy + (rnd() - 0.5) * 60, rnd() * 1.8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        } else if (fish.patternName === "Koi") {
+            ctx.fillStyle = "rgba(220, 38, 38, 0.28)";
+            ctx.beginPath();
+            ctx.ellipse(cx - 25, cy - 15, 55, 38, 0.4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "rgba(251, 191, 36, 0.22)";
+            ctx.beginPath();
+            ctx.ellipse(cx + 35, cy + 10, 40, 28, -0.3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(185, 28, 28, 0.35)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx - 40, cy + 5);
+            ctx.bezierCurveTo(cx, cy - 25, cx + 30, cy + 20, cx + 50, cy - 5);
+            ctx.stroke();
+        } else if (fish.patternName === "Neon") {
+            ctx.strokeStyle = "rgba(34, 211, 238, 0.55)";
+            ctx.lineWidth = 2.5;
+            ctx.lineCap = "round";
+            for (var n = 0; n < 5; n++) {
+                ctx.beginPath();
+                ctx.moveTo(cx - 70 + n * 8, cy - 35);
+                ctx.quadraticCurveTo(cx - 20 + n * 12, cy + (n % 2) * 15 - 8, cx + 60, cy - 20 + n * 6);
+                ctx.stroke();
+            }
+            ctx.shadowColor = "#22d3ee";
+            ctx.shadowBlur = 6;
+            ctx.strokeStyle = "rgba(165, 243, 252, 0.45)";
+            ctx.beginPath();
+            ctx.moveTo(cx - 50, cy);
+            ctx.lineTo(cx + 45, cy + 8);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+        ctx.restore();
+    }
 
     function resize() {
         canvas.width = window.innerWidth;
@@ -790,6 +887,10 @@
                     this.gameFish.visualLayers.l4Opaque = this.tailHex;
                     this.color = this.sex === "F" ? desaturate(this.bodyHex, 0.12) : this.bodyHex;
                     this.tailColor = this.sex === "F" ? desaturate(this.tailHex, 0.12) : this.tailHex;
+                    if (Math.random() < 0.5 && mother.patternName) this.patternName = mother.patternName;
+                    else if (father.patternName) this.patternName = father.patternName;
+                    else assignPatternName(this);
+                    if (!this.patternSeed) this.patternSeed = hashStringToSeed(this.id + "|pat");
                 } catch (err) {
                     console.warn(err);
                     this._initDemoGenetics(parent1, parent2, isWild);
@@ -838,6 +939,13 @@
             this.breedCooldownUntil = 0;
             this.breedCooldownUntilMs = 0;
             this.pitchAngle = 0;
+            this.aiPhase = "cruise";
+            this.aiTimer = 0;
+            this.wanderTx = this.x;
+            this.wanderTy = this.y;
+            this.naturalVx = 0;
+            this.naturalVy = 0;
+            if (!this.patternName) assignPatternName(this);
             if (parent1 && parent2) {
                 this._parentSameRegion = parent1.baseClass === parent2.baseClass;
                 this._parentBaseClassA = parent1.baseClass;
@@ -896,6 +1004,8 @@
             }
 
             if (targetFood && minDist < 400) {
+                this.naturalVx *= 0.9;
+                this.naturalVy *= 0.9;
                 let dx = targetFood.x - this.x;
                 let dy = targetFood.y - this.y;
                 this.dir = dx > 0 ? 1 : -1;
@@ -916,10 +1026,46 @@
                 }
             } else {
                 this.pitchAngle += (0 - this.pitchAngle) * 0.12;
-                this.x += this.personalSpeed * this.dir;
-                if (this.x > canvas.width - 40) this.dir = -1;
-                if (this.x < 40) this.dir = 1;
-
+                this.aiTimer--;
+                if (this.aiTimer <= 0) {
+                    this.aiTimer = 90 + Math.floor(Math.random() * 120);
+                    if (this.aiPhase === "cruise") {
+                        this.aiPhase = Math.random() < 0.55 ? "drift" : "hover";
+                        var mg = 70;
+                        this.wanderTx = mg + Math.random() * (canvas.width - mg * 2);
+                        this.wanderTy = WATERLINE + 45 + Math.random() * (canvas.height - WATERLINE - 90);
+                    } else {
+                        this.aiPhase = "cruise";
+                    }
+                }
+                var wdx = this.wanderTx - this.x;
+                var wdy = this.wanderTy - this.y;
+                var wdist = Math.hypot(wdx, wdy);
+                var spdBase = this.personalSpeed * (this.aiPhase === "drift" ? 2.2 : 1.5);
+                var wantVx = 0;
+                var wantVy = 0;
+                if (wdist > 6) {
+                    wantVx = (wdx / wdist) * spdBase;
+                    wantVy = (wdy / wdist) * spdBase * 0.5;
+                }
+                this.naturalVx += (wantVx - this.naturalVx) * 0.085;
+                this.naturalVy += (wantVy - this.naturalVy) * 0.085;
+                this.naturalVx *= 0.988;
+                this.naturalVy *= 0.988;
+                this.x += this.naturalVx;
+                this.y += this.naturalVy;
+                if (this.naturalVx > 0.04) this.dir = 1;
+                else if (this.naturalVx < -0.04) this.dir = -1;
+                if (this.x > canvas.width - 36) {
+                    this.x = canvas.width - 36;
+                    this.naturalVx *= -0.45;
+                    this.wanderTx = this.x - 50;
+                }
+                if (this.x < 36) {
+                    this.x = 36;
+                    this.naturalVx *= -0.45;
+                    this.wanderTx = this.x + 50;
+                }
                 if (Date.now() > this.glideTimer) {
                     this.targetY = WATERLINE + 50 + Math.random() * (canvas.height - WATERLINE - 100);
                     this.glideTimer = Date.now() + 3000 + Math.random() * 5000;
@@ -993,6 +1139,7 @@
 
             ctx.fillStyle = this.color;
             ctx.fill(new Path2D(BODY_PATH));
+            drawFishPattern(ctx, this);
 
             ctx.fillStyle = "#ffffff";
             ctx.fill(new Path2D(EYE_PATH));
@@ -1113,7 +1260,7 @@
         if (breedingAnim) return;
 
         if (currentMode === "decor") {
-            decors.push({ x: e.clientX, y: e.clientY });
+            decors.push({ x: e.clientX, y: e.clientY, phase: Math.random() * Math.PI * 2 });
             cancelMode();
             db.gold -= 300;
             return;
@@ -1305,6 +1452,42 @@
         document.getElementById("notice").style.display = "block";
     }
 
+    function toggleAutoBreedGenetics() {
+        db.autoBreedGenetics = !db.autoBreedGenetics;
+        var btn = document.getElementById("btn-auto-breed");
+        if (btn) {
+            btn.innerText = db.autoBreedGenetics ? "🧬 ผสมอัตโนมัติ: เปิด" : "🧬 ผสมอัตโนมัติ: ปิด";
+        }
+    }
+
+    function stepAutoBreedGenetics() {
+        if (!db.autoBreedGenetics || breedingAnim || fishes.length >= MAX_FISH) return;
+        if (db.timer < db.autoBreedCooldown) return;
+        var females = fishes.filter(function (f) {
+            return (
+                f.sex === "F" &&
+                !f.isRetired &&
+                f.age >= 2 &&
+                !f.breedingLocked &&
+                db.timer >= f.breedCooldownUntil
+            );
+        });
+        var males = fishes.filter(function (f) {
+            return (
+                f.sex === "M" &&
+                !f.isRetired &&
+                f.age >= 2 &&
+                !f.breedingLocked &&
+                db.timer >= f.breedCooldownUntil
+            );
+        });
+        if (females.length === 0 || males.length === 0) return;
+        var fi = Math.floor(Math.random() * females.length);
+        var mi = Math.floor(Math.random() * males.length);
+        startBreedingSequence(females[fi], males[mi]);
+        db.autoBreedCooldown = db.timer + 420;
+    }
+
     function enterDecorMode() {
         currentMode = "decor";
         document.getElementById("panel-right").classList.remove("open");
@@ -1461,25 +1644,29 @@
 
     function drawDecors() {
         decors.forEach((d) => {
-            var sway = Math.sin(db.timer * 0.018 + d.x * 0.01) * 6;
-            var x = d.x + sway;
-            var y = d.y;
-            var g = ctx.createRadialGradient(x, y - 55, 5, x, y - 40, 85);
-            g.addColorStop(0, "rgba(134, 239, 172, 0.55)");
-            g.addColorStop(0.45, "rgba(52, 211, 153, 0.35)");
-            g.addColorStop(1, "rgba(16, 185, 129, 0)");
-            ctx.fillStyle = g;
+            var ph = d.phase != null ? d.phase : 0;
+            var sway = Math.sin(db.timer * 0.014 + d.x * 0.008 + ph) * 4;
+            var cx = d.x + sway;
+            var cy = d.y;
+            var R = 42;
+            var leftCx = cx - R / 2;
+            var rightCx = cx + R / 2;
+            var tipY = cy - (Math.sqrt(3) * R) / 2;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(ph);
+            ctx.translate(-cx, -cy);
             ctx.beginPath();
-            ctx.ellipse(x, y - 42, 48, 72, 0.08, 0, Math.PI * 2);
+            ctx.moveTo(cx, tipY);
+            ctx.arc(leftCx, cy, R, -Math.PI / 3, Math.PI / 3, true);
+            ctx.arc(rightCx, cy, R, (2 * Math.PI) / 3, (4 * Math.PI) / 3, true);
+            ctx.closePath();
+            var gx = ctx.createLinearGradient(leftCx, cy, rightCx, cy);
+            gx.addColorStop(0, "rgba(187, 247, 208, 0.9)");
+            gx.addColorStop(1, "rgba(22, 101, 52, 0.82)");
+            ctx.fillStyle = gx;
             ctx.fill();
-            ctx.fillStyle = "rgba(167, 243, 208, 0.25)";
-            ctx.beginPath();
-            ctx.ellipse(x - 18, y - 28, 28, 44, -0.25, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = "rgba(110, 231, 183, 0.2)";
-            ctx.beginPath();
-            ctx.ellipse(x + 22, y - 22, 22, 36, 0.3, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.restore();
         });
     }
 
@@ -1498,6 +1685,7 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         stepBreedingAnim();
+        stepAutoBreedGenetics();
 
         db.timer++;
 
@@ -1567,6 +1755,7 @@
     window.toggleHealthBars = toggleHealthBars;
     window.toggleZenMode = toggleZenMode;
     window.enterBreedingMode = enterBreedingMode;
+    window.toggleAutoBreedGenetics = toggleAutoBreedGenetics;
     window.changeBG = changeBG;
 
     init();
