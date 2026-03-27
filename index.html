@@ -1391,7 +1391,18 @@
                         mother.gameFish = buildGameFishForMajestic(mother);
                         father.gameFish = buildGameFishForMajestic(father);
                     }
-                    fishes.push(new MajesticBetta(this.p1, this.p2, false));
+                    var baby = new MajesticBetta(this.p1, this.p2, false);
+                    var spawnX = this.x;
+                    var spawnY = Math.max(WATERLINE + 22, this.y);
+                    baby.x = spawnX;
+                    baby.y = spawnY;
+                    baby.targetY = spawnY;
+                    baby.wanderTx = spawnX;
+                    baby.wanderTy = spawnY;
+                    baby.naturalVx = 0;
+                    baby.naturalVy = 0;
+                    baby.glideVelocity = 0;
+                    fishes.push(baby);
                 }
             }
         }
@@ -2225,6 +2236,7 @@
             var prev = gachaState.pool[ix];
             var f = new MajesticBetta(null, null, true);
             applyGachaPreviewToFish(f, prev);
+            fishes.push(f);
         }
         db.carePoints += 3;
         closeGachaModal();
