@@ -322,8 +322,61 @@
         };
     }
 
-    var REGION_TO_SPECIES = { ภาคกลาง: "Central", มหาชัย: "Mahachai", อีสาน: "Isan", ภาคใต้: "South" };
+    var REGION_TO_SPECIES = { ภาคกลาง: "Central", มหาชัย: "Mahachai", อีสาน: "Isan", ภาคใต้: "South", ภาคตะวันออก: "Central" };
     var DEMO_RARITY_TO_ORDER = { common: "Common", uc: "UC", rare: "R", sr: "SR", ur: "UR", god: "GOD" };
+
+    /**
+     * Data Model: Fish Object (runtime snapshot on MajesticBetta.fishData)
+     * + Master SVG: viewBox 0 0 720 500 — draw order: tail group → Body → sidefin → scale → Eye (white ring + dark pupil)
+     *   Tail groups: Veiltail | Halfmoon | Crown_Tail | Double_Tail (one active by tailType)
+     */
+    var THAILAND_REGIONS = {
+        ภาคกลาง: { lineageId: "splendens", label: "Betta splendens (ภาคกลาง)" },
+        อีสาน: { lineageId: "smaragdina", label: "Betta smaragdina (ภาคอีสาน)" },
+        ภาคใต้: { lineageId: "imbellis", label: "Betta imbellis (ภาคใต้)" },
+        มหาชัย: { lineageId: "mahachaiensis", label: "Betta mahachaiensis (มหาชัย)" },
+        ภาคตะวันออก: { lineageId: "oriental", label: "Betta sp. East (ภาคตะวันออก)" },
+    };
+    var TAIL_WEIGHTS = [
+        { key: "VEILTAIL", label: "Veiltail", w: 0.4 },
+        { key: "HALFMOON", label: "Halfmoon", w: 0.28 },
+        { key: "CROWNTAIL", label: "Crown Tail", w: 0.22 },
+        { key: "DOUBLETAIL", label: "Double Tail", w: 0.1 },
+    ];
+    function rollTailBreedKey(rng) {
+        var t = typeof rng === "function" ? rng() : Math.random();
+        var acc = 0;
+        for (var i = 0; i < TAIL_WEIGHTS.length; i++) {
+            acc += TAIL_WEIGHTS[i].w;
+            if (t <= acc) return TAIL_WEIGHTS[i].key;
+        }
+        return TAIL_WEIGHTS[0].key;
+    }
+    /** Drop: C 70%, R 20%, SR 8%, UR 1.9%, GOD 0.1% — StatMultiplier = 2^(rank-1) */
+    var GAME_RANK_BY_LETTER = { C: 1, R: 2, SR: 3, UR: 4, GOD: 5 };
+    function statMultiplierFromLetter(letter) {
+        var r = GAME_RANK_BY_LETTER[letter] || 1;
+        return Math.pow(2, r - 1);
+    }
+    function rollGameRarityLetter(rng) {
+        var u = rng && typeof rng === "function" ? rng() : Math.random();
+        if (u < 0.7) return "C";
+        if (u < 0.9) return "R";
+        if (u < 0.98) return "SR";
+        if (u < 0.999) return "UR";
+        return "GOD";
+    }
+    function mapGameLetterToDemoRarityId(letter) {
+        if (letter === "C") return "common";
+        if (letter === "R") return "rare";
+        if (letter === "SR") return "sr";
+        if (letter === "UR") return "ur";
+        return "god";
+    }
+    function lineageIdFromRegion(regionName) {
+        var o = THAILAND_REGIONS[regionName];
+        return o ? o.lineageId : "splendens";
+    }
 
     /** สี solid ตัว/หาง — ไม่ไล่สี */
     const PALETTE = [
@@ -335,6 +388,14 @@
         { body: "#ffffff", tail: "#666666" },
         { body: "#0a0a0a", tail: "#ee2222" },
         { body: "#999999", tail: "#ffffff" },
+        { body: "#cc00cc", tail: "#ffff00" },
+        { body: "#ff6600", tail: "#003366" },
+        { body: "#00aa88", tail: "#ff0066" },
+        { body: "#442211", tail: "#aaddff" },
+        { body: "#c41e3a", tail: "#1a1a1a" },
+        { body: "#1e3a8a", tail: "#fbbf24" },
+        { body: "#7c3aed", tail: "#22c55e" },
+        { body: "#0ea5e9", tail: "#f97316" },
     ];
 
     function paletteIndexFromName(name) {
@@ -406,6 +467,99 @@
             },
             bloodline: { motherId: null, fatherId: null, generation: 0 },
             activeSkillIds: ["fin_guard"],
+        };
+    }
+
+    function demoRarityFromLetter(letter) {
+        var id = mapGameLetterToDemoRarityId(letter);
+        for (var i = 0; i < RARITIES.length; i++) {
+            if (RARITIES[i].id === id) return RARITIES[i];
+        }
+        return RARITIES[0];
+    }
+    function rarityLetterFromDemoRarityId(id) {
+        if (id === "god") return "GOD";
+        if (id === "ur") return "UR";
+        if (id === "sr") return "SR";
+        if (id === "rare") return "R";
+        return "C";
+    }
+    function rarityLetterFromBettaMasterRarity(r) {
+        if (!r) return "C";
+        if (r === "GOD") return "GOD";
+        if (r === "UR") return "UR";
+        if (r === "SSR" || r === "SR") return "SR";
+        if (r === "R") return "R";
+        return "C";
+    }
+    function tailLabelFromBreedKey(key) {
+        for (var i = 0; i < TAIL_WEIGHTS.length; i++) {
+            if (TAIL_WEIGHTS[i].key === key) return TAIL_WEIGHTS[i].label;
+        }
+        return "Veiltail";
+    }
+    /**
+     * Fish Object (snapshot บน fish.fishData):
+     * id, name, color, rarity C|R|SR|UR|GOD, lv, hp, maxHp, exp, maxExp, atk, def,
+     * skills[], extraSkills[], gender, tailType, pattern (Solid),
+     * stamina, maxStamina, inHospital, injured, lineage (lineageId),
+     * bloodline pure|hybrid, pureLineageSkillGranted, breedsRemaining,
+     * breedCooldownUntil (ms), filialGen, injuredHealCdUntil (ms)
+     * Master SVG: viewBox 0 0 720 500 — ลำดับวาด tail → Body → sidefin → scale → Eye
+     */
+    function syncFishData(fish) {
+        if (!fish.gameFish) fish.gameFish = buildGameFishForMajestic(fish);
+        var eff = computeEffectiveBaseStats(fish.gameFish);
+        var letter = fish.gameRarityLetter || rarityLetterFromDemoRarityId(fish.rarity.id);
+        var mult = statMultiplierFromLetter(letter);
+        var gen = fish.gameFish.bloodline ? fish.gameFish.bloodline.generation : 0;
+        var levelCap = 50;
+        var lv = Math.min(levelCap, Math.max(1, 1 + Math.floor(fish.age)));
+        var lineageId = lineageIdFromRegion(fish.baseClass);
+        var bloodlineStr =
+            fish._parentBaseClassA && fish._parentBaseClassB && fish._parentBaseClassA === fish._parentBaseClassB ? "pure" : "hybrid";
+        if (!fish._parentBaseClassA) bloodlineStr = gen <= 0 ? "pure" : "hybrid";
+        var maxHp = Math.max(20, Math.round(eff.hp * mult * 0.15));
+        var hp = Math.max(0, Math.round((fish.vitality / 100) * maxHp));
+        var atk = Math.max(1, Math.round(eff.atk * mult * 0.08));
+        var def = Math.max(1, Math.round(eff.def * mult * 0.08));
+        var maxExp = 100 + lv * 25;
+        var exp = Math.min(maxExp, Math.round(fish.age * 15));
+        var maxStamina = 80 + lv * 2;
+        var stamina = Math.max(0, Math.round(maxStamina * (1 - fish.hunger / 100)));
+        var breedsRem = letter === "C" ? 9999 : Math.max(0, 12 - gen);
+        var cdMs = 0;
+        if (fish.breedCooldownUntilMs != null) cdMs = fish.breedCooldownUntilMs;
+        else if (typeof db !== "undefined" && db && fish.breedCooldownUntil > db.timer)
+            cdMs = Date.now() + (fish.breedCooldownUntil - db.timer) * (1000 / 60);
+        fish.fishData = {
+            id: "fish_" + fish.id.replace(/[^a-z0-9]+/gi, "_"),
+            name: letter + " · " + (fish.displayName || tailLabelFromBreedKey(fish.breedKey)),
+            color: fish.bodyHex || fish.color,
+            rarity: letter,
+            lv: lv,
+            hp: hp,
+            maxHp: maxHp,
+            exp: exp,
+            maxExp: maxExp,
+            atk: atk,
+            def: def,
+            skills: (fish.gameFish.activeSkillIds || ["fin_guard"]).slice(),
+            extraSkills: [],
+            gender: fish.sex,
+            tailType: tailLabelFromBreedKey(fish.breedKey),
+            pattern: "Solid",
+            stamina: stamina,
+            maxStamina: maxStamina,
+            inHospital: false,
+            injured: fish.vitality < 35,
+            lineage: lineageId,
+            bloodline: bloodlineStr,
+            pureLineageSkillGranted: gen >= 3 && bloodlineStr === "pure",
+            breedsRemaining: breedsRem,
+            breedCooldownUntil: cdMs,
+            filialGen: gen,
+            injuredHealCdUntil: fish.injuredHealCdUntil || 0,
         };
     }
 
@@ -511,7 +665,7 @@
     const ctx = canvas.getContext("2d");
 
     // --- DB & Game State ---
-    let db = { gold: 5000, foodCount: 15, timer: 0, hasAutoFeeder: false, o2: 100, waste: 0 };
+    let db = { gold: 5000, foodCount: 15, timer: 0, hasAutoFeeder: false, o2: 100, waste: 0, lastAutoFeedMs: 0 };
     let fishes = [],
         foods = [],
         decors = [],
@@ -539,7 +693,7 @@
         { id: "ur", name: "UR", prob: 0.9992, multi: 2.0 },
         { id: "god", name: "GOD", prob: 1.0, multi: 2.5 },
     ];
-    const REGIONS = ["ภาคกลาง", "มหาชัย", "อีสาน", "ภาคใต้"];
+    const REGIONS = ["ภาคกลาง", "มหาชัย", "อีสาน", "ภาคใต้", "ภาคตะวันออก"];
 
     const BREEDS = {
         VEILTAIL: [
@@ -583,11 +737,7 @@
         return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
     }
     function getRandomRarity() {
-        let r = Math.random();
-        for (let item of RARITIES) {
-            if (r <= item.prob) return item;
-        }
-        return RARITIES[0];
+        return demoRarityFromLetter(rollGameRarityLetter());
     }
 
     class MajesticBetta {
@@ -604,6 +754,7 @@
                 this.tailHex = vl.l3Iridescent || PALETTE[0].tail;
                 this.paletteIndex = paletteIndexFromName(vl.l1Body);
                 this.patternType = vl.l1Body || "P0";
+                this.gameRarityLetter = rarityLetterFromBettaMasterRarity(this.gameFish.rarity);
                 this.color = this.sex === "F" ? desaturate(this.bodyHex, 0.12) : this.bodyHex;
                 this.tailColor = this.sex === "F" ? desaturate(this.tailHex, 0.12) : this.tailHex;
             } else if (parent1 && parent2 && parent1.gameFish && parent2.gameFish) {
@@ -624,6 +775,7 @@
                     }) || "ภาคกลาง";
                     var ro = RARITY_ORDER.indexOf(this.gameFish.rarity);
                     this.rarity = RARITIES[Math.min(RARITIES.length - 1, Math.max(0, ro))];
+                    this.gameRarityLetter = rarityLetterFromDemoRarityId(this.rarity.id);
                     this.patternType = (mother.paletteName || "P0") + "×" + (father.paletteName || "P0");
                     var mi = mother.paletteIndex != null ? mother.paletteIndex : paletteIndexFromName(mother.paletteName);
                     var fi = father.paletteIndex != null ? father.paletteIndex : paletteIndexFromName(father.paletteName);
@@ -651,7 +803,15 @@
             this.vitality = 100;
             this.hunger = 0;
             if (!this.baseClass) this.baseClass = REGIONS[Math.floor(Math.random() * REGIONS.length)];
-            if (!this.rarity) this.rarity = parent1 ? RARITIES[Math.min(5, Math.max(0, Math.floor((RARITIES.indexOf(parent1.rarity) + RARITIES.indexOf(parent2.rarity)) / 2) + (Math.random() > 0.8 ? 1 : 0)))] : getRandomRarity();
+            if (!this.rarity) {
+                if (parent1) {
+                    this.rarity = RARITIES[Math.min(5, Math.max(0, Math.floor((RARITIES.indexOf(parent1.rarity) + RARITIES.indexOf(parent2.rarity)) / 2) + (Math.random() > 0.8 ? 1 : 0)))];
+                } else {
+                    this.gameRarityLetter = rollGameRarityLetter(createRng([this.id, "rarity"]));
+                    this.rarity = demoRarityFromLetter(this.gameRarityLetter);
+                }
+            }
+            if (!this.gameRarityLetter) this.gameRarityLetter = rarityLetterFromDemoRarityId(this.rarity.id);
             if (!this.patternType) this.patternType = "P" + Math.floor(Math.random() * PALETTE.length);
 
             if (!bredGameFish && !(parent1 && parent2 && this.gameFish && parent1.gameFish && parent2.gameFish)) {
@@ -659,7 +819,7 @@
                 if (!this.gameFish) this.gameFish = buildGameFishForMajestic(this);
             }
 
-            this.breedKey = Math.random() > 0.7 ? "HALFMOON" : "VEILTAIL";
+            this.breedKey = rollTailBreedKey(createRng([this.id, "tail"]));
             this.breedObj = BREEDS[this.breedKey];
 
             this.x = canvas.width / 2 + (Math.random() * 200 - 100);
@@ -674,13 +834,25 @@
             this.selected = false;
             this.breedingLocked = false;
             this.breedCooldownUntil = 0;
+            this.breedCooldownUntilMs = 0;
             this.pitchAngle = 0;
+            if (parent1 && parent2) {
+                this._parentSameRegion = parent1.baseClass === parent2.baseClass;
+                this._parentBaseClassA = parent1.baseClass;
+                this._parentBaseClassB = parent2.baseClass;
+            }
+            syncFishData(this);
         }
 
         _initDemoGenetics(parent1, parent2, isWild) {
             this.sex = Math.random() > 0.5 ? "M" : "F";
             this.baseClass = REGIONS[Math.floor(Math.random() * REGIONS.length)];
-            this.rarity = parent1 ? RARITIES[Math.min(5, Math.max(0, Math.floor((RARITIES.indexOf(parent1.rarity) + RARITIES.indexOf(parent2.rarity)) / 2) + (Math.random() > 0.8 ? 1 : 0)))] : getRandomRarity();
+            if (parent1) {
+                this.rarity = RARITIES[Math.min(5, Math.max(0, Math.floor((RARITIES.indexOf(parent1.rarity) + RARITIES.indexOf(parent2.rarity)) / 2) + (Math.random() > 0.8 ? 1 : 0)))];
+            } else {
+                this.gameRarityLetter = rollGameRarityLetter(createRng([this.id, "demoR"]));
+                this.rarity = demoRarityFromLetter(this.gameRarityLetter);
+            }
             this.patternType = "P" + Math.floor(Math.random() * PALETTE.length);
         }
 
@@ -695,20 +867,18 @@
             this.age += 1 / DAY_FRAMES;
             if (this.age >= RETIRE_AGE) this.isRetired = true;
 
-            if (!isZenMode || db.foodCount === 0) {
-                this.hunger += 100 / (DAY_FRAMES * 2);
+            this.hunger += 100 / (DAY_FRAMES * 2);
 
-                if (this.hunger > 100) this.hunger = 100;
+            if (this.hunger > 100) this.hunger = 100;
 
-                if (this.hunger >= 80 || db.waste >= 80) {
-                    this.vitality -= 0.05;
-                }
-                if (this.vitality <= 0) {
-                    this.isDead = true;
-                    fishes = fishes.filter((f) => f !== this);
-                    updateUI();
-                    return;
-                }
+            if (this.hunger >= 80 || db.waste >= 80) {
+                this.vitality -= 0.05;
+            }
+            if (this.vitality <= 0) {
+                this.isDead = true;
+                fishes = fishes.filter((f) => f !== this);
+                updateUI();
+                return;
             }
 
             let targetFood = null;
@@ -764,6 +934,7 @@
 
             this.flipScale += (this.dir - this.flipScale) * 0.1;
             this.wagPhase += 0.04 + this.personalSpeed * 0.05;
+            syncFishData(this);
         }
 
         draw() {
@@ -817,6 +988,9 @@
 
             ctx.fillStyle = "#ffffff";
             ctx.fill(new Path2D(EYE_PATH));
+            ctx.strokeStyle = "#9ca3af";
+            ctx.lineWidth = 2.5;
+            ctx.stroke(new Path2D(EYE_PATH));
             ctx.fillStyle = "#000000";
             ctx.beginPath();
             ctx.arc(68.7, 215.7, 9, 0, Math.PI * 2);
@@ -1005,7 +1179,9 @@
         if (selectedFishes.length !== 1) return;
         let f = selectedFishes[0];
         if (!f.gameFish) f.gameFish = buildGameFishForMajestic(f);
+        syncFishData(f);
         var eff = computeEffectiveBaseStats(f.gameFish);
+        var fd = f.fishData;
         let statHTML =
             '<div class="info-card">' +
             "<b>ID:</b> " +
@@ -1057,6 +1233,20 @@
             (f.gameFish.precisionScore * 100).toFixed(0) +
             "% · F" +
             f.gameFish.bloodline.generation +
+            "<br><b>Data model:</b> " +
+            fd.rarity +
+            " · Lv" +
+            fd.lv +
+            " · HP " +
+            fd.hp +
+            "/" +
+            fd.maxHp +
+            " · " +
+            fd.tailType +
+            " · " +
+            fd.pattern +
+            " · lineage " +
+            fd.lineage +
             "</div>";
         document.getElementById("fish-status-content").innerHTML = statHTML;
         document.getElementById("sell-price").innerText = f.calcPrice();
@@ -1178,8 +1368,12 @@
         } else if (breedingAnim.phase === "kiss") {
             if (breedingAnim.t >= 45) {
                 eggs.push(new Egg(breedingAnim.mx, breedingAnim.my + 20, a, b, true));
-                a.breedCooldownUntil = db.timer + Math.floor(DAY_FRAMES * 0.6);
-                b.breedCooldownUntil = db.timer + Math.floor(DAY_FRAMES * 0.6);
+                var cdFrames = Math.floor(DAY_FRAMES * 0.6);
+                var cdMs = (cdFrames * 1000) / 60;
+                a.breedCooldownUntil = db.timer + cdFrames;
+                b.breedCooldownUntil = db.timer + cdFrames;
+                a.breedCooldownUntilMs = Date.now() + cdMs;
+                b.breedCooldownUntilMs = Date.now() + cdMs;
                 breedingAnim = null;
             }
         }
@@ -1257,11 +1451,17 @@
         db.o2 = Math.min(100, Math.max(0, 100 - fishes.length * 5 + decors.length * 15));
         db.waste = Math.min(100, Math.max(0, db.waste + fishes.length * 0.01 - decors.length * 0.05));
 
-        if (db.hasAutoFeeder && db.timer % 60 === 0 && db.foodCount > 0) {
-            let hungryFish = fishes.find((f) => f.hunger > 60);
-            if (hungryFish) {
-                db.foodCount--;
-                foods.push({ x: hungryFish.x, y: WATERLINE, eaten: false });
+        if (db.hasAutoFeeder && db.foodCount > 0) {
+            var nowMs = Date.now();
+            if (nowMs - db.lastAutoFeedMs >= 4000) {
+                db.lastAutoFeedMs = nowMs;
+                var hungryFish = fishes.find(function (f) {
+                    return f.hunger > 60;
+                });
+                if (hungryFish) {
+                    db.foodCount--;
+                    foods.push({ x: hungryFish.x, y: hungryFish.y, eaten: false });
+                }
             }
         }
 
