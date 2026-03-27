@@ -6,33 +6,41 @@
     <title>Majestic Betta V6.3 - Hybrid Evolution (FIXED)</title>
     <style>
         :root { --primary: #0080ff; }
-        body { margin: 0; background: #1a365d; overflow: hidden; font-family: 'Segoe UI', sans-serif; transition: background 0.5s; color: white; }
-        canvas { display: block; }
+        body { margin: 0; background: #3d6a9e; overflow: hidden; font-family: 'Segoe UI', sans-serif; transition: background 0.8s ease; color: white; }
+        /* canvas ต้องอยู่หลัง UI — ไม่งั้นทับกาชา/HUD ทำให้ไม่เห็นการ์ดและไม่มีปลา */
+        #aquarium {
+            display: block;
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
 
         /* UI Management */
-        .panel { position: fixed; top: 0; bottom: 0; width: 260px; background: rgba(0, 0, 0, 0.85); padding: 20px; transition: 0.4s; z-index: 100; pointer-events: auto; overflow-y: auto; }
+        .panel { position: fixed; top: 0; bottom: 0; width: 260px; background: rgba(0, 0, 0, 0.75); padding: 20px; transition: 0.4s; z-index: 800; pointer-events: auto; overflow-y: auto; }
         #left-panel { left: 0; transform: translateX(-100%); border-right: 1px solid var(--primary); }
         #right-panel { right: 0; transform: translateX(100%); border-left: 1px solid var(--primary); }
         .panel.active { transform: translateX(0); }
 
         /* Gacha System */
-        #gacha-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        .gacha-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin: 30px; }
+        #gacha-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .gacha-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin: 30px; min-height: 160px; max-width: min(96vw, 620px); }
         .gacha-card { width: 100px; height: 130px; background: #222; border: 2px solid #444; border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: 0.2s; }
         .gacha-card.selected { border-color: gold; box-shadow: 0 0 15px gold; transform: scale(1.05); }
 
         /* Zen Mode Clock */
-        #zen-clock { position: absolute; top: 50px; right: 50px; font-size: 3rem; font-weight: bold; cursor: move; display: none; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        #zen-clock { position: absolute; top: 50px; right: 50px; z-index: 700; font-size: 3rem; font-weight: bold; cursor: move; display: none; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
         
         /* Stats & HUD */
-        #hud { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; background: rgba(0,0,0,0.5); padding: 10px 30px; border-radius: 50px; pointer-events: none; }
+        #hud { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 500; display: flex; gap: 20px; background: rgba(0,0,0,0.45); padding: 10px 30px; border-radius: 50px; pointer-events: none; }
         .stat-item { display: flex; flex-direction: column; align-items: center; }
         .stat-val { font-weight: bold; font-size: 1.2rem; }
 
         #breed-result { font-size: 0.85rem; line-height: 1.4; margin-top: 12px; padding: 10px; background: rgba(0,128,255,0.15); border-radius: 8px; border: 1px solid rgba(0,128,255,0.35); min-height: 3em; }
 
         button { cursor: pointer; padding: 10px 15px; background: var(--primary); border: none; color: white; border-radius: 5px; font-weight: bold; margin: 5px 0; width: 100%; }
-        #exit-zen { position: fixed; bottom: 20px; right: 20px; display: none; opacity: 0.3; }
+        #exit-zen { position: fixed; bottom: 20px; right: 20px; z-index: 700; display: none; opacity: 0.3; }
         #exit-zen:hover { opacity: 1; }
     </style>
 </head>
@@ -57,13 +65,12 @@
     <div id="breed-result">ผลผสมล่าสุดจะแสดงที่นี่</div>
     <button onclick="toggleVitality()">เปิด/ปิด หลอดเลือด</button>
     <hr>
-    <label>เลือกสีตู้</label>
-    <div style="display: flex; gap: 5px; margin-top: 10px;">
-        <div style="background:#0b3c6f; width:30px; height:30px; cursor:pointer;" onclick="setBG('#0b3c6f')"></div>
-        <div style="background:#6ec6ff; width:30px; height:30px; cursor:pointer;" onclick="setBG('#6ec6ff')"></div>
-        <div style="background:#b9f6ca; width:30px; height:30px; cursor:pointer;" onclick="setBG('#b9f6ca')"></div>
-        <div style="background:#fff59d; width:30px; height:30px; cursor:pointer;" onclick="setBG('#fff59d')"></div>
-        <div style="background:#d7ccc8; width:30px; height:30px; cursor:pointer;" onclick="setBG('#d7ccc8')"></div>
+    <label>โทนสีน้ำในตู้</label>
+    <p style="font-size:0.75rem; opacity:0.8; margin:6px 0 8px;">ฟ้าเข้ม / ฟ้าอ่อน / ตามเวลา (กลางวันสว่าง กลางคืนเข้ม)</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px;">
+        <button type="button" style="width:auto; flex:1; min-width:72px; padding:8px;" onclick="setWaterTheme('dark')">ฟ้าเข้ม</button>
+        <button type="button" style="width:auto; flex:1; min-width:72px; padding:8px;" onclick="setWaterTheme('light')">ฟ้าอ่อน</button>
+        <button type="button" style="width:auto; flex:1; min-width:72px; padding:8px;" onclick="setWaterTheme('auto')">ตามเวลา</button>
     </div>
 </div>
 
@@ -74,7 +81,7 @@
     <button onclick="toggleZen()">เข้าโหมด Zen</button>
 </div>
 
-<div style="position:fixed; bottom:20px; left:20px; z-index:200;">
+<div style="position:fixed; bottom:20px; left:20px; z-index:900;">
     <button onclick="togglePanel('left')" style="width:60px;">🐟</button>
     <button onclick="togglePanel('right')" style="width:60px;">🛒</button>
 </div>
@@ -465,8 +472,61 @@
     autoFeeder: false,
     showVitality: true,
     isZen: false,
-    currentBG: "#1a365d"
+    /** ฟ้าเข้ม / ฟ้าอ่อน / ตามเวลา */
+    waterTheme: "auto",
+    waterColorDark: "#2a5080",
+    waterColorLight: "#9cc8ec",
+    currentBG: "#3d6a9e",
+    _lastWaterBg: "",
+    gameStarted: false
   };
+
+  function hexToRgb(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : { r: 45, g: 106, b: 158 };
+  }
+  function rgbToHex(r, g, b) {
+    const c = (n) => {
+      const x = Math.max(0, Math.min(255, Math.round(n)));
+      const h = x.toString(16);
+      return h.length === 1 ? "0" + h : h;
+    };
+    return "#" + c(r) + c(g) + c(b);
+  }
+  function lerpRgb(a, b, t) {
+    return {
+      r: a.r + (b.r - a.r) * t,
+      g: a.g + (b.g - a.g) * t,
+      b: a.b + (b.b - a.b) * t,
+    };
+  }
+  /** 0 = กลางคืนเข้ม, 1 = กลางวันสว่าง */
+  function dayBrightnessFactor(date) {
+    const d = date || /* @__PURE__ */ new Date();
+    const h = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+    return 0.5 - 0.5 * Math.cos((h / 24) * 2 * Math.PI);
+  }
+  function waterBackgroundColor() {
+    const dark = hexToRgb(STATE.waterColorDark);
+    const light = hexToRgb(STATE.waterColorLight);
+    if (STATE.waterTheme === "dark") return STATE.waterColorDark;
+    if (STATE.waterTheme === "light") return STATE.waterColorLight;
+    const t = dayBrightnessFactor();
+    const rgb = lerpRgb(dark, light, t);
+    return rgbToHex(rgb.r, rgb.g, rgb.b);
+  }
+  function applyWaterBackground() {
+    const c = waterBackgroundColor();
+    if (STATE._lastWaterBg === c) return;
+    STATE._lastWaterBg = c;
+    document.body.style.background = c;
+    STATE.currentBG = c;
+  }
+  function setWaterTheme(mode) {
+    STATE.waterTheme = mode;
+    STATE._lastWaterBg = "";
+    applyWaterBackground();
+  }
 
   var Betta = class {
     id;
@@ -594,6 +654,12 @@
   var selectedIndices = [];
   function initGacha() {
     const grid = document.getElementById("gacha-grid");
+    if (!grid) {
+      console.error("ไม่พบ #gacha-grid — การ์ดกาชาจะไม่ถูกสร้าง");
+      return;
+    }
+    grid.innerHTML = "";
+    selectedIndices = [];
     for (let i = 0; i < 10; i++) {
       const div = document.createElement("div");
       div.className = "gacha-card";
@@ -625,7 +691,10 @@
       const fishId = `fish-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`;
       STATE.fishes.push(new Betta(fishId, type, sex, STATE.ownerId));
     });
-    requestAnimationFrame(loop);
+    if (!STATE.gameStarted) {
+      STATE.gameStarted = true;
+      requestAnimationFrame(loop);
+    }
   }
   function togglePanel(id) {
     const p = document.getElementById(id + "-panel");
@@ -639,9 +708,19 @@
     document.getElementById("zen-clock").style.display = STATE.isZen ? "block" : "none";
     document.getElementById("exit-zen").style.display = STATE.isZen ? "block" : "none";
   }
+  /** เก็บไว้ให้ HTML เก่าที่เรียก setBG ยังใช้ได้ (สลับเป็นฟ้าเข้ม) */
   function setBG(c) {
+    if (c === "#0b3c6f" || c === "#1a365d") {
+      setWaterTheme("dark");
+      return;
+    }
+    if (c === "#6ec6ff") {
+      setWaterTheme("light");
+      return;
+    }
     document.body.style.background = c;
     STATE.currentBG = c;
+    STATE.waterTheme = "custom";
   }
   function addSeaweed() {
     STATE.seaweeds.push({ x: Math.random() * width, h: 150 + Math.random() * 100 });
@@ -711,6 +790,7 @@
       alert("\u0E41\u0E15\u0E49\u0E21 Care \u0E44\u0E21\u0E48\u0E1E\u0E2D!");
     }
   }
+  var lastWaterAutoSec = -1;
   function loop(t) {
     ctx.clearRect(0, 0, width, height);
     renderEnv(t);
@@ -731,6 +811,11 @@
     );
     const now = /* @__PURE__ */ new Date();
     document.getElementById("zen-clock").innerText = now.getHours().toString().padStart(2, "0") + ":" + now.getMinutes().toString().padStart(2, "0");
+    const sec = Math.floor(t / 1e3);
+    if (STATE.waterTheme === "auto" && sec !== lastWaterAutoSec) {
+      lastWaterAutoSec = sec;
+      applyWaterBackground();
+    }
     requestAnimationFrame(loop);
   }
   window.addEventListener("resize", () => {
@@ -738,7 +823,12 @@
     height = canvas.height = window.innerHeight;
   });
   window.dispatchEvent(new Event("resize"));
-  initGacha();
+  applyWaterBackground();
+  try {
+    initGacha();
+  } catch (err) {
+    console.error("initGacha:", err);
+  }
   var clock = document.getElementById("zen-clock");
   clock.onmousedown = (e) => {
     const shiftX = e.clientX - clock.getBoundingClientRect().left;
@@ -757,6 +847,7 @@
   htmlHandlers.togglePanel = (id) => togglePanel(id);
   htmlHandlers.toggleZen = toggleZen;
   htmlHandlers.setBG = setBG;
+  htmlHandlers.setWaterTheme = setWaterTheme;
   htmlHandlers.addSeaweed = addSeaweed;
   htmlHandlers.toggleVitality = toggleVitality;
   htmlHandlers.triggerRomance = triggerRomance;
