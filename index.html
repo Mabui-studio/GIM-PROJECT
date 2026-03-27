@@ -132,6 +132,12 @@
             <button class="action-btn" style="background:#10b981;" onclick="enterDecorMode()">🌿 ซื้อสาหร่ายเพิ่ม O2 (300 💰)</button>
             
             <hr style="margin:20px 0; border:0; border-top:1px solid #e2e8f0;">
+            <h3>🌊 Fluid V9.1 — ความเร็วว่าย</h3>
+            <p style="font-size:0.8rem; color:#64748b; margin:0 0 8px;">ปรับความเร็วรวม + การส่ายหาง (speedMultiplier)</p>
+            <label for="speed-mult-slider" style="font-size:0.85rem; display:block; margin-bottom:6px;">ความเร็ว: <span id="speed-mult-label">0.50</span></label>
+            <input type="range" id="speed-mult-slider" min="0.1" max="1" step="0.05" value="0.5" style="width:100%; margin-bottom:14px;" />
+
+            <hr style="margin:20px 0; border:0; border-top:1px solid #e2e8f0;">
             <h3>⚙️ ระบบอัตโนมัติ (Auto)</h3>
             <button class="action-btn" id="btn-autofeeder" style="background:#3b82f6;" onclick="buyAutoFeeder()">🤖 ซื้อเครื่องให้อาหาร (1000 💰)</button>
             
@@ -177,6 +183,8 @@
     <script>
 (function () {
     "use strict";
+
+    window.speedMultiplier = 0.5;
 
     const OWNER_ID = "player-1";
 
@@ -786,7 +794,7 @@
     };
     const BODY_PATH = "M312.2,319.2h-180c-40.5,0-99-32.7-99-73.2v-1.5c0-40.5,58.7-73.2,99-73.2h180c40.5,0,105.5,32.7,105.5,73.2v1.5C417.8,286.5,352.7,319.2,312.2,319.2z";
     const EYE_PATH = "M102.6,215.7c0,18.7-15.2,33.9-33.9,33.9s-33.9-15.2-33.9-33.9s15.2-33.9,33.9-33.9S102.6,197,102.6,215.7z";
-    var FISH_PHYS = { friction: 0.98, baseSpeed: 0.5, yCapRatio: 0.3, maxTilt: 0.15, chaseTiltMax: 0.17 };
+    var FISH_PHYS = { yCapRatio: 0.3 };
 
     function assignPatternName(fish) {
         var rng = createRng([fish.id || "x", "pattern"]);
@@ -1049,23 +1057,29 @@
             this.y = parent1 && parent2 && !bredGameFish ? WATERLINE + 20 : WATERLINE + 100 + Math.random() * 200;
             this.targetY = this.y;
             this.dir = Math.random() > 0.5 ? 1 : -1;
-            this.flipScale = this.dir;
             this.personalSpeed = 0.4 + Math.random() * 0.3;
-            this.wagPhase = Math.random() * Math.PI * 2;
+            this.baseVx = 0.5;
+            this.tilt = 0;
+            this.pitchAngle = 0;
+            this.tailPhase = Math.random() * Math.PI * 2;
+            this.wagPhase = this.tailPhase;
+            this.turnLag = 0;
+            this.friction = 0.98;
             this.selected = false;
             this.breedingLocked = false;
             this.breedCooldownUntil = 0;
             this.breedCooldownUntilMs = 0;
-            this.pitchAngle = 0;
             this.aiPhase = "cruise";
             this.aiTimer = 0;
             this.wanderTx = this.x;
             this.wanderTy = this.y;
-            this.vx = this.dir * FISH_PHYS.baseSpeed * this.personalSpeed;
+            this.vx = this.dir * this.baseVx * this.personalSpeed;
             this.vy = 0;
             this.tailLag = 0;
-            this.tailLagVel = 0;
+            this.w = 90;
             this.bodyW = 52;
+            this.visualScaleX = this.vx > 0 ? 1 : -1;
+            this.flipScale = this.visualScaleX;
             if (!this.patternName) assignPatternName(this);
             if (parent1 && parent2) {
                 this._parentSameRegion = parent1.baseClass === parent2.baseClass;
@@ -1113,21 +1127,29 @@
             this.flipScale = typeof s.flipScale === "number" ? s.flipScale : this.dir;
             this.turnTilt = typeof s.turnTilt === "number" ? s.turnTilt : 0;
             this.personalSpeed = typeof s.personalSpeed === "number" ? s.personalSpeed : 0.5;
-            this.wagPhase = typeof s.wagPhase === "number" ? s.wagPhase : 0;
+            this.baseVx = typeof s.baseVx === "number" ? s.baseVx : 0.5;
+            this.tilt = typeof s.tilt === "number" ? s.tilt : typeof s.pitchAngle === "number" ? s.pitchAngle : 0;
+            this.pitchAngle = this.tilt;
+            this.tailPhase = typeof s.tailPhase === "number" ? s.tailPhase : typeof s.wagPhase === "number" ? s.wagPhase : 0;
+            this.wagPhase = this.tailPhase;
+            this.turnLag = typeof s.turnLag === "number" ? s.turnLag : 0;
+            this.friction = typeof s.friction === "number" ? s.friction : 0.98;
             this.selected = false;
             this.breedingLocked = !!s.breedingLocked;
             this.breedCooldownUntil = typeof s.breedCooldownUntil === "number" ? s.breedCooldownUntil : 0;
             this.breedCooldownUntilMs = typeof s.breedCooldownUntilMs === "number" ? s.breedCooldownUntilMs : 0;
-            this.pitchAngle = 0;
             this.aiPhase = s.aiPhase || "cruise";
             this.aiTimer = typeof s.aiTimer === "number" ? s.aiTimer : 0;
             this.wanderTx = typeof s.wanderTx === "number" ? s.wanderTx : this.x;
             this.wanderTy = typeof s.wanderTy === "number" ? s.wanderTy : this.y;
-            this.vx = typeof s.vx === "number" ? s.vx : this.dir * FISH_PHYS.baseSpeed * this.personalSpeed;
+            this.vx = typeof s.vx === "number" ? s.vx : this.dir * this.baseVx * this.personalSpeed;
             this.vy = typeof s.vy === "number" ? s.vy : 0;
             this.tailLag = typeof s.tailLag === "number" ? s.tailLag : 0;
-            this.tailLagVel = typeof s.tailLagVel === "number" ? s.tailLagVel : 0;
+            this.w = typeof s.w === "number" ? s.w : 90;
             this.bodyW = typeof s.bodyW === "number" ? s.bodyW : 52;
+            this.visualScaleX =
+                typeof s.visualScaleX === "number" ? s.visualScaleX : typeof s.flipScale === "number" ? s.flipScale : this.vx > 0 ? 1 : -1;
+            this.flipScale = this.visualScaleX;
             this._parentSameRegion = s._parentSameRegion;
             this._parentBaseClassA = s._parentBaseClassA;
             this._parentBaseClassB = s._parentBaseClassB;
@@ -1182,6 +1204,7 @@
                 this.y = WATERLINE + 25;
                 this.vx = 0;
                 this.vy = 0;
+                this.tilt = 0;
                 this.pitchAngle = 0;
                 updateUI();
                 syncFishData(this);
@@ -1190,9 +1213,7 @@
 
             var o2Mult = 0.38 + (db.o2 / 100) * 0.62;
             var surfacePull = db.o2 < 32 ? (WATERLINE + 55 - this.y) * 0.004 : 0;
-            var speedMult = o2Mult * this.personalSpeed;
-            var baseSpd = FISH_PHYS.baseSpeed * speedMult;
-            var margin = this.bodyW / 2 + 20;
+            var bs = this.baseVx * this.personalSpeed;
 
             let targetFood = null;
             let minDist = Infinity;
@@ -1213,9 +1234,10 @@
                 var dy = targetFood.y - this.y;
                 var dist = Math.hypot(dx, dy) + 1e-6;
                 this.dir = dx > 0 ? 1 : -1;
-                var wantVx = (dx / dist) * baseSpd * 2.4;
+                this.targetY = targetFood.y;
+                var wantVx = (dx / dist) * bs * 2.4;
                 this.vx += (wantVx - this.vx) * 0.11;
-                var wantVy = (dy / dist) * baseSpd * 0.55;
+                var wantVy = (dy / dist) * bs * 0.55;
                 this.vy += (wantVy - this.vy) * 0.06;
                 var maxVyChase = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
                 this.vy = Math.max(-maxVyChase, Math.min(maxVyChase, this.vy));
@@ -1239,49 +1261,42 @@
                         this.aiPhase = "cruise";
                     }
                 }
+                this.targetY = this.wanderTy;
                 var wdx = this.wanderTx - this.x;
                 var wdy = this.wanderTy - this.y;
                 var wdist = Math.hypot(wdx, wdy);
                 var wantVx = 0;
                 var wantVy = 0;
                 if (wdist > 8) {
-                    wantVx = (wdx / wdist) * baseSpd * (this.aiPhase === "drift" ? 1.9 : 1.35);
-                    wantVy = (wdy / wdist) * baseSpd * 0.45;
+                    wantVx = (wdx / wdist) * bs * (this.aiPhase === "drift" ? 1.9 : 1.35);
+                    wantVy = (wdy / wdist) * bs * 0.45;
                 }
                 this.vx += (wantVx - this.vx) * 0.08;
-                var smoothY = (this.wanderTy - this.y > 0 ? 1 : -1) * (0.6 * speedMult);
-                this.vy += (smoothY - this.vy) * 0.05;
                 var maxVy = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
+                this.vy += (wantVy - this.vy) * 0.08;
                 this.vy = Math.max(-maxVy, Math.min(maxVy, this.vy));
                 if (this.vx > 0.03) this.dir = 1;
                 else if (this.vx < -0.03) this.dir = -1;
-                if (this.x > canvas.width - margin) {
-                    this.x = canvas.width - margin;
-                    this.vx *= -0.82;
-                    this.wanderTx = this.x - 50;
-                }
-                if (this.x < margin) {
-                    this.x = margin;
-                    this.vx *= -0.82;
-                    this.wanderTx = this.x + 50;
-                }
             }
 
-            this.vx *= FISH_PHYS.friction;
-            this.vy *= FISH_PHYS.friction;
+            this.vx *= this.friction;
+            this.vy *= this.friction;
             this.vy += surfacePull * 0.35;
 
-            this.x += this.vx;
+            let currentSpeedMul = window.speedMultiplier !== undefined ? window.speedMultiplier : 0.5;
+            let curVx = this.vx * currentSpeedMul * o2Mult;
+            var dTargetY = this.targetY - this.y;
+            this.vy += (((dTargetY > 0 ? 1 : -1) * 0.6 * currentSpeedMul * o2Mult) - this.vy) * 0.05;
+
+            const margin = (this.w || 90) / 2 + 20;
+            if ((this.x > canvas.width - margin && this.vx > 0) || (this.x < margin && this.vx < 0)) {
+                this.vx *= -1;
+                this.turnLag = 0.8;
+            }
+
+            this.x += curVx;
             this.y += this.vy;
 
-            if (this.x > canvas.width - margin) {
-                this.x = canvas.width - margin;
-                this.vx *= -0.85;
-            }
-            if (this.x < margin) {
-                this.x = margin;
-                this.vx *= -0.85;
-            }
             if (this.y < WATERLINE + 22) {
                 this.y = WATERLINE + 22;
                 this.vy *= 0.45;
@@ -1291,24 +1306,27 @@
                 this.vy *= 0.45;
             }
 
-            var currentVx = this.vx;
-            var maxT = chasing ? FISH_PHYS.chaseTiltMax : FISH_PHYS.maxTilt;
-            var targetTilt = (this.vy / (Math.abs(currentVx) + 0.08)) * 0.2;
-            targetTilt = Math.max(-maxT, Math.min(maxT, targetTilt));
-            this.pitchAngle += (targetTilt - this.pitchAngle) * 0.1;
+            let targetTilt = (this.vy / (Math.abs(curVx) || 1)) * 0.2;
+            const maxTilt = 0.15;
+            this.tilt += (Math.max(-maxTilt, Math.min(maxTilt, targetTilt)) - this.tilt) * 0.1;
+            this.pitchAngle = this.tilt;
 
-            this.tailLagVel += (this.vx - this.tailLag) * 0.045;
-            this.tailLagVel *= 0.91;
-            this.tailLag += this.tailLagVel;
+            let targetFlip = this.vx > 0 ? 1 : -1;
+            this.visualScaleX += (targetFlip - this.visualScaleX) * 0.1;
+            this.flipScale = this.visualScaleX;
 
-            this.flipScale += (this.dir - this.flipScale) * 0.1;
-            if (this.flipScale > 0.995) this.flipScale = 0.995;
-            if (this.flipScale < -0.995) this.flipScale = -0.995;
+            this.tailPhase += 0.15 + Math.abs(curVx) * 0.05;
+            this.wagPhase = this.tailPhase;
+            this.turnLag *= 0.92;
+
+            if (Math.random() < 0.01) {
+                this.targetY = 100 + Math.random() * (canvas.height - 200);
+            }
+
             var z = Math.abs(this.flipScale);
             var curve = z < 0.55 ? this.dir * (0.55 - z) * 0.95 : 0;
             this.turnTilt += (curve - this.turnTilt) * 0.16;
 
-            this.wagPhase += (0.045 + this.personalSpeed * 0.055) * o2Mult;
             syncFishData(this);
         }
 
@@ -1349,18 +1367,22 @@
             }
 
             let currentSize = 0.08 + Math.min(1, this.age / 2) * 0.12;
-            var swimTilt = this.vy * 0.12 * this.dir;
             var facePartner =
                 breedingAnim &&
                 (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") &&
                 (this === breedingAnim.a || this === breedingAnim.b);
             var otherFish = facePartner ? (this === breedingAnim.a ? breedingAnim.b : breedingAnim.a) : null;
-            var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : this.flipScale;
-            var effFlip = Math.max(0.4, Math.abs(rawDraw)) * (rawDraw >= 0 ? 1 : -1);
-            ctx.rotate(this.pitchAngle + swimTilt + (this.isDead ? 0 : this.turnTilt));
-            ctx.scale(-effFlip * currentSize, currentSize);
+            var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : this.visualScaleX;
+            var flip = rawDraw;
+            var displayScaleX = Math.abs(flip) < 0.4 ? (flip > 0 ? 0.4 : -0.4) : flip;
+            ctx.rotate(this.tilt + (this.isDead ? 0 : this.turnTilt));
+            ctx.scale(displayScaleX * currentSize, currentSize);
+
+            var tailSway = Math.sin(this.tailPhase) * 0.2;
+            var finalTailAngle = tailSway + (this.vx > 0 ? -this.turnLag : this.turnLag);
+            var wag = Math.sin(this.wagPhase) * 7 + finalTailAngle * 42;
+
             ctx.translate(-150, -250);
-            var wag = Math.sin(this.wagPhase) * 7;
 
             this.breedObj.forEach((p, i) => {
                 ctx.save();
@@ -1424,7 +1446,7 @@
                     baby.vx = 0;
                     baby.vy = 0;
                     baby.tailLag = 0;
-                    baby.tailLagVel = 0;
+                    baby.turnLag = 0;
                     fishes.push(baby);
                 }
             }
@@ -1455,12 +1477,16 @@
         father.selected = false;
         selectedFishes = [];
         cancelMode();
-        var mx = canvas.width * 0.5;
-        var my = WATERLINE + (canvas.height - WATERLINE) * 0.42;
+        var mx = (mother.x + father.x) * 0.5;
+        var my = (mother.y + father.y) * 0.5;
         mother.dir = mx >= mother.x ? 1 : -1;
         father.dir = mx >= father.x ? 1 : -1;
-        mother.flipScale = mother.dir;
-        father.flipScale = father.dir;
+        mother.visualScaleX = mother.dir;
+        father.visualScaleX = father.dir;
+        mother.flipScale = mother.visualScaleX;
+        father.flipScale = father.visualScaleX;
+        mother.tilt = 0;
+        father.tilt = 0;
         mother.pitchAngle = 0;
         father.pitchAngle = 0;
         breedingAnim = {
@@ -1871,8 +1897,12 @@
         var my = breedingAnim.my;
         a.dir = mx >= a.x ? 1 : -1;
         b.dir = mx >= b.x ? 1 : -1;
-        a.flipScale = a.dir;
-        b.flipScale = b.dir;
+        a.visualScaleX = a.dir;
+        b.visualScaleX = b.dir;
+        a.flipScale = a.visualScaleX;
+        b.flipScale = b.visualScaleX;
+        a.tilt = 0;
+        b.tilt = 0;
         a.pitchAngle = 0;
         b.pitchAngle = 0;
         if (breedingAnim.phase === "approach") {
@@ -1996,9 +2026,16 @@
             targetY: f.targetY,
             dir: f.dir,
             flipScale: f.flipScale,
+            visualScaleX: f.visualScaleX,
             turnTilt: f.turnTilt,
             personalSpeed: f.personalSpeed,
+            baseVx: f.baseVx,
+            tilt: f.tilt,
+            tailPhase: f.tailPhase,
             wagPhase: f.wagPhase,
+            turnLag: f.turnLag,
+            friction: f.friction,
+            w: f.w,
             breedingLocked: f.breedingLocked,
             breedCooldownUntil: f.breedCooldownUntil,
             breedCooldownUntilMs: f.breedCooldownUntilMs,
@@ -2009,7 +2046,6 @@
             vx: f.vx,
             vy: f.vy,
             tailLag: f.tailLag,
-            tailLagVel: f.tailLagVel,
             bodyW: f.bodyW,
             _parentSameRegion: f._parentSameRegion,
             _parentBaseClassA: f._parentBaseClassA,
@@ -2059,6 +2095,7 @@
                     activeKey: waterState.activeKey,
                 },
                 fishIdCounter: fishIdCounter,
+                speedMultiplier: window.speedMultiplier,
                 fishes: fishes.map(serializeFish),
                 decors: decors,
                 eggs: eggData,
@@ -2096,6 +2133,9 @@
                 waterState.lastHex = "";
             }
             fishIdCounter = payload.fishIdCounter || 1;
+            if (payload.speedMultiplier != null && !isNaN(payload.speedMultiplier)) {
+                window.speedMultiplier = Math.max(0.1, Math.min(1, payload.speedMultiplier));
+            }
             decors = Array.isArray(payload.decors) ? payload.decors : [];
             foods = Array.isArray(payload.foods) ? payload.foods : [];
             fishes = [];
@@ -2280,10 +2320,27 @@
         }
     });
 
+    function setupSpeedSlider() {
+        var sl = document.getElementById("speed-mult-slider");
+        var lab = document.getElementById("speed-mult-label");
+        if (!sl) return;
+        sl.value = String(window.speedMultiplier);
+        if (lab) lab.textContent = Number(window.speedMultiplier).toFixed(2);
+        sl.addEventListener("input", function () {
+            var v = parseFloat(sl.value);
+            if (!isNaN(v)) {
+                window.speedMultiplier = Math.max(0.1, Math.min(1, v));
+                if (lab) lab.textContent = window.speedMultiplier.toFixed(2);
+                saveGame();
+            }
+        });
+    }
+
     function init() {
         setWaterTheme("auto");
         buildWaterPresetDots();
         var loaded = loadGame();
+        setupSpeedSlider();
         if (!loaded || fishes.length === 0) {
             openGachaModal("start");
         } else {
