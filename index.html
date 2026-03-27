@@ -130,6 +130,7 @@
             <button class="action-btn" style="background:#f59e0b;" onclick="buyFood()">ซื้ออาหาร x10 (100 💰)</button>
             <button class="action-btn" style="background:#8b5cf6;" onclick="buyRandomFish()">🎁 สุ่มปลาป่า (500 💰)</button>
             <button class="action-btn" style="background:#10b981;" onclick="enterDecorMode()">🌿 ซื้อสาหร่ายเพิ่ม O2 (300 💰)</button>
+            <button type="button" class="action-btn" style="background:#059669;" onclick="toggleSeaweedEditMode()">🎨 แก้ไขสาหร่าย (Seaweed Edit)</button>
             
             <hr style="margin:20px 0; border:0; border-top:1px solid #e2e8f0;">
             <h3>🌊 Fluid V9.1 — ความเร็วว่าย</h3>
@@ -749,7 +750,11 @@
         eggs = [];
     let selectedFishes = [];
     let fishIdCounter = 1;
-    let currentMode = "normal"; // 'normal', 'decor', 'breeding'
+    let decorIdCounter = 1;
+    let seaweedEditMode = false;
+    let selectedSeaweed = null;
+    let seaweedHandleDrag = null;
+    let currentMode = "normal"; // 'normal', 'decor', 'breeding', 'seaweed_edit'
     let isZenMode = false;
     let showHealthBars = false;
     /** @type {{ phase: string, t: number, a: MajesticBetta, b: MajesticBetta, startAx: number, startAy: number, startBx: number, startBy: number, mx: number, my: number, approachVel: number } | null} */
@@ -1287,7 +1292,8 @@
                 this.turnLag = 0.8;
             }
 
-            this.x += curVx;
+            var moveStep = this.vx * speedMul * 3.2;
+            this.x += moveStep;
             this.y += this.vy;
 
             if (this.y < WATERLINE + 22) {
@@ -1303,8 +1309,9 @@
                 (Math.max(-0.15, Math.min(0.15, (this.vy / (Math.abs(curVx) || 1)) * 0.2)) - this.tilt) * 0.1;
             this.pitchAngle = this.tilt;
 
-            let targetFlip = this.vx > 0 ? 1 : -1;
-            this.visualScaleX += (targetFlip - this.visualScaleX) * 0.1;
+            let targetFlip = this.vx > 0 ? 1 : this.vx < 0 ? -1 : this.visualScaleX;
+            var flipLerp = Math.abs(this.vx) > 0.04 ? 0.28 : 0.1;
+            this.visualScaleX += (targetFlip - this.visualScaleX) * flipLerp;
             this.flipScale = this.visualScaleX;
 
             this.tailPhase += 0.15 + Math.abs(curVx) * 0.05;
@@ -1365,7 +1372,9 @@
                 (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") &&
                 (this === breedingAnim.a || this === breedingAnim.b);
             var otherFish = facePartner ? (this === breedingAnim.a ? breedingAnim.b : breedingAnim.a) : null;
-            var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : this.visualScaleX;
+            var swimFacing =
+                Math.abs(this.vx) > 0.012 ? (this.vx > 0 ? 1 : -1) : this.visualScaleX > 0 ? 1 : -1;
+            var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : swimFacing;
             var flip = rawDraw;
             var displayScaleX = Math.abs(flip) < 0.4 ? (flip > 0 ? 0.4 : -0.4) : flip;
             ctx.rotate(this.tilt + (this.isDead ? 0 : this.turnTilt));
@@ -1472,6 +1481,255 @@
             ctx.restore();
         }
     }
+
+    class Seaweed {
+        constructor(baseX, baseY, h, restore) {
+            this.type = "seaweedV2";
+            this.id = "SW-" + String(decorIdCounter++).padStart(4, "0");
+            this.baseX = baseX;
+            this.baseY = baseY;
+            this.h = h != null ? h : 160;
+            this.segmentRest = this.h / 11;
+            this.baseStiffness = 0.8;
+            this.tipStiffness = 0.75;
+            this.damping = 0.5;
+            this.phase = Math.random() * Math.PI * 2;
+            this.points = [];
+            if (restore && restore.points && restore.points.length === 12) {
+                for (var ri = 0; ri < 12; ri++) {
+                    var rp = restore.points[ri];
+                    this.points.push({
+                        x: rp.x,
+                        y: rp.y,
+                        ox: rp.ox != null ? rp.ox : rp.x,
+                        oy: rp.oy != null ? rp.oy : rp.y,
+                    });
+                }
+                if (restore.id) {
+                    this.id = restore.id;
+                    var m = /^SW-(\d+)$/i.exec(this.id);
+                    if (m) {
+                        var nn = parseInt(m[1], 10);
+                        if (!isNaN(nn) && nn >= decorIdCounter) decorIdCounter = nn + 1;
+                    }
+                }
+            } else {
+                for (var i = 0; i < 12; i++) {
+                    var py = baseY - i * this.segmentRest;
+                    this.points.push({ x: baseX, y: py, ox: baseX, oy: py });
+                }
+            }
+        }
+
+        rebuildHeight(newH) {
+            this.h = Math.max(80, Math.min(420, newH));
+            this.segmentRest = this.h / 11;
+            var bx = this.baseX;
+            var by = this.baseY;
+            for (var i = 0; i < 12; i++) {
+                var py = by - i * this.segmentRest;
+                this.points[i].x = bx;
+                this.points[i].y = py;
+                this.points[i].ox = bx;
+                this.points[i].oy = py;
+            }
+        }
+
+        applyFishDrift(fishesArr) {
+            var self = this;
+            fishesArr.forEach(function (fish) {
+                if (fish.isDead) return;
+                for (var pi = 0; pi < 12; pi++) {
+                    var p = self.points[pi];
+                    var d = Math.hypot(fish.x - p.x, fish.y - p.y);
+                    if (d < 55 && d > 1) {
+                        var nx = (p.x - fish.x) / d;
+                        var ny = (p.y - fish.y) / d;
+                        var push = (55 - d) * 0.018;
+                        p.x += nx * push + fish.vx * 0.12;
+                        p.y += ny * push + fish.vy * 0.08;
+                    }
+                }
+            });
+        }
+
+        update() {
+            var sway = Math.sin(db.timer * 0.014 + this.phase + this.baseX * 0.004) * 2.2;
+            this.points[0].x = this.baseX + sway;
+            this.points[0].y = this.baseY;
+            this.points[0].ox = this.points[0].x;
+            this.points[0].oy = this.points[0].y;
+
+            for (var i = 1; i < 12; i++) {
+                var p = this.points[i];
+                var vx = p.x - p.ox;
+                var vy = p.y - p.oy;
+                var t = (i - 1) / 11;
+                var stiff = this.baseStiffness + t * (this.tipStiffness - this.baseStiffness);
+                var damp = 1 - this.damping * 0.35;
+                p.ox = p.x;
+                p.oy = p.y;
+                p.x += vx * stiff * damp + sway * 0.08 * t;
+                p.y += vy * stiff * damp - 0.02 * t;
+            }
+
+            for (var c = 0; c < 4; c++) {
+                for (var j = 0; j < 11; j++) {
+                    var a = this.points[j];
+                    var b = this.points[j + 1];
+                    var dx = b.x - a.x;
+                    var dy = b.y - a.y;
+                    var dist = Math.hypot(dx, dy) + 1e-6;
+                    var diff = (dist - this.segmentRest) / dist;
+                    var mx = dx * diff * 0.5;
+                    var my = dy * diff * 0.5;
+                    if (j > 0) {
+                        a.x += mx;
+                        a.y += my;
+                    }
+                    b.x -= mx;
+                    b.y -= my;
+                }
+                this.points[0].x = this.baseX + sway;
+                this.points[0].y = this.baseY;
+            }
+        }
+
+        draw() {
+            var pts = this.points;
+            if (!pts || pts.length < 12) return;
+            var amp = 5;
+            var teeth = 0.85;
+
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+
+            for (var i = 0; i < 11; i++) {
+                var p0 = pts[i];
+                var p1 = pts[i + 1];
+                var dx = p1.x - p0.x;
+                var dy = p1.y - p0.y;
+                var len = Math.hypot(dx, dy) + 1e-6;
+                var px = -dy / len;
+                var py = dx / len;
+                var seg = 6;
+                for (var s = 1; s <= seg; s++) {
+                    var u = s / seg;
+                    var bx = p0.x + dx * u;
+                    var by = p0.y + dy * u;
+                    var wobble = Math.sin((i * seg + s) * teeth + this.phase + db.timer * 0.08) * amp * (0.35 + u * 0.65);
+                    ctx.lineTo(bx + px * wobble, by + py * wobble);
+                }
+            }
+
+            var tip = pts[11];
+            var tPrev = pts[10];
+            var tdx = tip.x - tPrev.x;
+            var tdy = tip.y - tPrev.y;
+            var tlen = Math.hypot(tdx, tdy) + 1e-6;
+            var nx = -tdy / tlen;
+            var ny = tdx / tlen;
+            ctx.quadraticCurveTo(tip.x + nx * 10, tip.y + ny * 10, tip.x - nx * 4, tip.y - tlen * 0.08);
+
+            for (var j = 10; j >= 0; j--) {
+                var q0 = pts[j + 1];
+                var q1 = pts[j];
+                var qdx = q1.x - q0.x;
+                var qdy = q1.y - q0.y;
+                var qlen = Math.hypot(qdx, qdy) + 1e-6;
+                var qpx = -qdy / qlen;
+                var qpy = qdx / qlen;
+                var seg2 = 6;
+                for (var t2 = 1; t2 <= seg2; t2++) {
+                    var u2 = t2 / seg2;
+                    var lx = q0.x + qdx * u2;
+                    var ly = q0.y + qdy * u2;
+                    var w2 = Math.sin((j * seg2 + t2 + 17) * teeth + this.phase) * amp * (0.35 + (1 - u2) * 0.65);
+                    ctx.lineTo(lx - qpx * w2, ly - qpy * w2);
+                }
+            }
+            ctx.closePath();
+
+            var g = ctx.createLinearGradient(this.baseX, this.baseY, tip.x, tip.y - this.h * 0.2);
+            g.addColorStop(0, "rgb(18, 72, 42)");
+            g.addColorStop(0.55, "rgb(42, 120, 72)");
+            g.addColorStop(1, "rgb(130, 200, 150)");
+            ctx.fillStyle = g;
+            ctx.globalAlpha = 0.88;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
+        bounds() {
+            var minX = Infinity,
+                maxX = -Infinity,
+                minY = Infinity,
+                maxY = -Infinity;
+            for (var i = 0; i < this.points.length; i++) {
+                var p = this.points[i];
+                minX = Math.min(minX, p.x);
+                maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            }
+            return { minX: minX, maxX: maxX, minY: minY, maxY: maxY, cx: (minX + maxX) / 2, topY: minY };
+        }
+
+        hitTest(mx, my) {
+            var b = this.bounds();
+            return mx >= b.minX - 20 && mx <= b.maxX + 20 && my >= b.topY - 10 && my <= b.maxY + 15;
+        }
+    }
+
+    function migrateLegacyDecor(raw) {
+        if (raw && raw.type === "seaweedV2" && raw.points && raw.points.length === 12) {
+            var sw = new Seaweed(raw.baseX, raw.baseY, raw.h || 160, raw);
+            if (raw.id) sw.id = raw.id;
+            return sw;
+        }
+        if (raw && raw.x != null && raw.y != null) {
+            return new Seaweed(raw.x, raw.y, 150 + (raw.seed != null ? (raw.seed % 80) : 40), null);
+        }
+        return null;
+    }
+
+    function drawSeaweedEditOverlay() {
+        if (!seaweedEditMode || !selectedSeaweed) return;
+        var b = selectedSeaweed.bounds();
+        var pad = 12;
+        ctx.save();
+        ctx.strokeStyle = "rgba(59, 130, 246, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(b.minX - pad, b.topY - pad, b.maxX - b.minX + pad * 2, b.maxY - b.minY + pad * 2);
+        ctx.setLineDash([]);
+        var hx = b.cx;
+        var hy = b.topY - pad - 6;
+        ctx.fillStyle = "#3b82f6";
+        ctx.beginPath();
+        ctx.arc(hx, hy, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function toggleSeaweedEditMode() {
+        seaweedEditMode = !seaweedEditMode;
+        selectedSeaweed = null;
+        seaweedHandleDrag = null;
+        if (seaweedEditMode) {
+            currentMode = "seaweed_edit";
+            document.getElementById("notice-text").innerText =
+                "🎨 โหมดแก้ไขสาหร่าย: คลิกสาหร่าย → ลากจุดฟ้าด้านบนเพื่อยืด/หดความสูง";
+            document.getElementById("notice").style.display = "block";
+        } else {
+            if (currentMode === "seaweed_edit") currentMode = "normal";
+            document.getElementById("notice").style.display = "none";
+        }
+    }
+    window.toggleSeaweedEditMode = toggleSeaweedEditMode;
 
     function startBreedingSequence(fa, fb) {
         var mother = fa.sex === "F" ? fa : fb;
@@ -1584,22 +1842,57 @@
         zenCanvasExitHandler(e);
     }, { passive: false });
 
+    canvas.addEventListener("mousemove", function (e) {
+        if (!seaweedHandleDrag || !seaweedHandleDrag.seaweed) return;
+        var sw = seaweedHandleDrag.seaweed;
+        var dy = seaweedHandleDrag.startY - e.clientY;
+        var nh = Math.max(80, Math.min(420, seaweedHandleDrag.startH + dy));
+        sw.rebuildHeight(nh);
+        sw.baseY = sw.points[0].y;
+        sw.baseX = sw.points[0].x;
+        saveGame();
+    });
+    canvas.addEventListener("mouseup", function () {
+        seaweedHandleDrag = null;
+    });
+    canvas.addEventListener("mouseleave", function () {
+        seaweedHandleDrag = null;
+    });
+
     canvas.addEventListener("mousedown", (e) => {
         if (isZenMode) return;
         if (breedingAnim) return;
 
         if (currentMode === "decor") {
-            decors.push({
-            x: e.clientX,
-            y: e.clientY,
-            phase: Math.random() * Math.PI * 2,
-            kelpColor: randomMutedKelpRgb(),
-            seed: Math.floor(Math.random() * 10000),
-        });
+            decors.push(new Seaweed(e.clientX, e.clientY, 150 + Math.random() * 60, null));
             cancelMode();
             db.gold -= 300;
             saveGame();
             updateUI();
+            return;
+        }
+
+        if (seaweedEditMode) {
+            var hx = 0,
+                hy = 0;
+            if (selectedSeaweed) {
+                var bb = selectedSeaweed.bounds();
+                hx = bb.cx;
+                hy = bb.topY - 18;
+            }
+            if (selectedSeaweed && Math.hypot(e.clientX - hx, e.clientY - hy) < 18) {
+                seaweedHandleDrag = { seaweed: selectedSeaweed, startY: e.clientY, startH: selectedSeaweed.h };
+                return;
+            }
+            var hit = null;
+            for (var di = decors.length - 1; di >= 0; di--) {
+                var dd = decors[di];
+                if (dd.type === "seaweedV2" && dd.hitTest && dd.hitTest(e.clientX, e.clientY)) {
+                    hit = dd;
+                    break;
+                }
+            }
+            selectedSeaweed = hit;
             return;
         }
 
@@ -2002,6 +2295,23 @@
     var SAVE_KEY = "majestic-betta-v7";
     var saveFrameCounter = 0;
 
+    function serializeDecor(d) {
+        if (d.type === "seaweedV2" && d.points) {
+            return {
+                type: "seaweedV2",
+                id: d.id,
+                baseX: d.baseX,
+                baseY: d.baseY,
+                h: d.h,
+                phase: d.phase,
+                points: d.points.map(function (p) {
+                    return { x: p.x, y: p.y, ox: p.ox, oy: p.oy };
+                }),
+            };
+        }
+        return d;
+    }
+
     function serializeFish(f) {
         return {
             id: f.id,
@@ -2102,7 +2412,7 @@
                 fishIdCounter: fishIdCounter,
                 speedMultiplier: window.speedMultiplier,
                 fishes: fishes.map(serializeFish),
-                decors: decors,
+                decors: decors.map(serializeDecor),
                 eggs: eggData,
                 foods: foods,
             };
@@ -2141,7 +2451,13 @@
             if (payload.speedMultiplier != null && !isNaN(payload.speedMultiplier)) {
                 window.speedMultiplier = Math.max(0.1, Math.min(1, payload.speedMultiplier));
             }
-            decors = Array.isArray(payload.decors) ? payload.decors : [];
+            decors = [];
+            if (Array.isArray(payload.decors)) {
+                for (var di = 0; di < payload.decors.length; di++) {
+                    var swObj = migrateLegacyDecor(payload.decors[di]);
+                    if (swObj) decors.push(swObj);
+                }
+            }
             foods = Array.isArray(payload.foods) ? payload.foods : [];
             fishes = [];
             if (Array.isArray(payload.fishes)) {
@@ -2355,55 +2671,17 @@
         loop();
     }
 
-    function randomMutedKelpRgb() {
-        var r = 95 + Math.floor(Math.random() * 38);
-        var g = 125 + Math.floor(Math.random() * 42);
-        var b = 98 + Math.floor(Math.random() * 35);
-        return "rgb(" + r + "," + g + "," + b + ")";
-    }
     function rgbStringFromHex(hex) {
         var o = hexToRgb(hex);
         return "rgb(" + o.r + "," + o.g + "," + o.b + ")";
     }
 
-    function drawSerratedLeafPath(ctx2, x0, y0, w, h, teeth) {
-        var n = teeth || 14;
-        ctx2.beginPath();
-        ctx2.moveTo(x0 - w * 0.08, y0 + h * 0.5);
-        var tipX = x0,
-            tipY = y0 - h * 0.5;
-        ctx2.quadraticCurveTo(x0 + w * 0.45, y0 - h * 0.15, tipX, tipY);
-        ctx2.quadraticCurveTo(x0 - w * 0.45, y0 - h * 0.15, x0 + w * 0.08, y0 + h * 0.5);
-        for (var t = 0; t <= n; t++) {
-            var ty = y0 + h * 0.5 + (t / n) * h * 0.42;
-            var inward = t % 2 === 0 ? w * 0.12 : 0;
-            ctx2.lineTo(x0 - w * 0.42 + inward, ty);
-        }
-        ctx2.closePath();
-    }
-
     function drawDecors() {
-        decors.forEach((d) => {
-            if (!d.kelpColor) d.kelpColor = randomMutedKelpRgb();
-            var ph = d.phase != null ? d.phase : 0;
-            var seed = d.seed != null ? d.seed : 0;
-            var sway = Math.sin(db.timer * 0.012 + d.x * 0.006 + ph) * 4;
-            var baseX = d.x + sway;
-            var baseY = d.y;
-            for (var layer = 0; layer < 3; layer++) {
-                var rot = ph + layer * 0.35 + (seed % 7) * 0.02;
-                var lx = baseX + Math.cos(rot) * layer * 12;
-                var ly = baseY + layer * 18;
-                var w = 55 + (seed % 5) * 8 + layer * 10;
-                var h = 110 + layer * 22;
-                ctx.save();
-                ctx.translate(lx, ly);
-                ctx.rotate(rot + Math.sin(db.timer * 0.01 + seed) * 0.04);
-                drawSerratedLeafPath(ctx, 0, 0, w, h, 16 + layer * 2);
-                ctx.fillStyle = d.kelpColor;
-                ctx.globalAlpha = 0.55 - layer * 0.06;
-                ctx.fill();
-                ctx.restore();
+        decors.forEach(function (d) {
+            if (d.type === "seaweedV2" && typeof d.update === "function") {
+                d.update();
+                d.applyFishDrift(fishes);
+                d.draw();
             }
         });
     }
@@ -2462,6 +2740,7 @@
 
         drawWaterline();
         drawDecors();
+        drawSeaweedEditOverlay();
 
         foods = foods.filter((f) => !f.eaten && f.y < canvasCssH);
         ctx.fillStyle = "#e67e22";
