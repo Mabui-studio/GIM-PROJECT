@@ -12,8 +12,8 @@
             display: block;
             position: fixed;
             inset: 0;
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            height: 100vh;
             z-index: 0;
             touch-action: none;
             cursor: crosshair;
@@ -726,6 +726,8 @@
 
     const canvas = document.getElementById("aquarium");
     const ctx = canvas.getContext("2d");
+    var canvasCssW = window.innerWidth;
+    var canvasCssH = window.innerHeight;
 
     // --- DB & Game State ---
     let db = {
@@ -934,9 +936,13 @@
     }
 
     function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        WATERLINE = canvas.height * 0.15;
+        var dpr = window.devicePixelRatio || 1;
+        canvasCssW = window.innerWidth;
+        canvasCssH = window.innerHeight;
+        canvas.width = canvasCssW * dpr;
+        canvas.height = canvasCssH * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        WATERLINE = canvasCssH * 0.15;
     }
     window.addEventListener("resize", resize);
     resize();
@@ -1053,9 +1059,10 @@
             this.breedKey = rollTailBreedKey(createRng([this.id, "tail"]));
             this.breedObj = BREEDS[this.breedKey];
 
-            this.x = canvas.width / 2 + (Math.random() * 200 - 100);
+            this.x = canvasCssW / 2 + (Math.random() * 200 - 100);
             this.y = parent1 && parent2 && !bredGameFish ? WATERLINE + 20 : WATERLINE + 100 + Math.random() * 200;
             this.targetY = this.y;
+            this.targetX = this.x;
             this.dir = Math.random() > 0.5 ? 1 : -1;
             this.personalSpeed = 0.4 + Math.random() * 0.3;
             this.baseVx = 0.5;
@@ -1120,9 +1127,10 @@
             this.hunger = typeof s.hunger === "number" ? s.hunger : 0;
             this.breedKey = s.breedKey && BREEDS[s.breedKey] ? s.breedKey : "VEILTAIL";
             this.breedObj = BREEDS[this.breedKey];
-            this.x = typeof s.x === "number" ? s.x : canvas.width * 0.5;
+            this.x = typeof s.x === "number" ? s.x : canvasCssW * 0.5;
             this.y = typeof s.y === "number" ? s.y : WATERLINE + 120;
             this.targetY = typeof s.targetY === "number" ? s.targetY : this.y;
+            this.targetX = typeof s.targetX === "number" ? s.targetX : this.x;
             this.dir = s.dir === -1 ? -1 : 1;
             this.flipScale = typeof s.flipScale === "number" ? s.flipScale : this.dir;
             this.turnTilt = typeof s.turnTilt === "number" ? s.turnTilt : 0;
@@ -1211,7 +1219,6 @@
                 return;
             }
 
-            var o2Mult = 0.38 + (db.o2 / 100) * 0.62;
             var surfacePull = db.o2 < 32 ? (WATERLINE + 55 - this.y) * 0.004 : 0;
             var bs = this.baseVx * this.personalSpeed;
 
@@ -1230,14 +1237,15 @@
             var chasing = targetFood && minDist < 400;
 
             if (chasing) {
-                var dx = targetFood.x - this.x;
-                var dy = targetFood.y - this.y;
-                var dist = Math.hypot(dx, dy) + 1e-6;
-                this.dir = dx > 0 ? 1 : -1;
+                var fdx = targetFood.x - this.x;
+                var fdy = targetFood.y - this.y;
+                var fdist = Math.hypot(fdx, fdy) + 1e-6;
+                this.dir = fdx > 0 ? 1 : -1;
+                this.targetX = targetFood.x;
                 this.targetY = targetFood.y;
-                var wantVx = (dx / dist) * bs * 2.4;
+                var wantVx = (fdx / fdist) * bs * 2.4;
                 this.vx += (wantVx - this.vx) * 0.11;
-                var wantVy = (dy / dist) * bs * 0.55;
+                var wantVy = (fdy / fdist) * bs * 0.55;
                 this.vy += (wantVy - this.vy) * 0.06;
                 var maxVyChase = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
                 this.vy = Math.max(-maxVyChase, Math.min(maxVyChase, this.vy));
@@ -1249,32 +1257,15 @@
                     updateUI();
                 }
             } else {
-                this.aiTimer--;
-                if (this.aiTimer <= 0) {
-                    this.aiTimer = 90 + Math.floor(Math.random() * 120);
-                    if (this.aiPhase === "cruise") {
-                        this.aiPhase = Math.random() < 0.55 ? "drift" : "hover";
-                        var mg = 70;
-                        this.wanderTx = mg + Math.random() * (canvas.width - mg * 2);
-                        this.wanderTy = WATERLINE + 45 + Math.random() * (canvas.height - WATERLINE - 90);
-                    } else {
-                        this.aiPhase = "cruise";
-                    }
-                }
-                this.targetY = this.wanderTy;
-                var wdx = this.wanderTx - this.x;
-                var wdy = this.wanderTy - this.y;
-                var wdist = Math.hypot(wdx, wdy);
-                var wantVx = 0;
-                var wantVy = 0;
-                if (wdist > 8) {
-                    wantVx = (wdx / wdist) * bs * (this.aiPhase === "drift" ? 1.9 : 1.35);
-                    wantVy = (wdy / wdist) * bs * 0.45;
-                }
-                this.vx += (wantVx - this.vx) * 0.08;
-                var maxVy = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
-                this.vy += (wantVy - this.vy) * 0.08;
-                this.vy = Math.max(-maxVy, Math.min(maxVy, this.vy));
+                var tdx = this.targetX - this.x;
+                var tdy = this.targetY - this.y;
+                var tdist = Math.hypot(tdx, tdy) + 1e-6;
+                var wantTVx = (tdx / tdist) * bs * 1.35;
+                var wantTVy = (tdy / tdist) * bs * 0.55;
+                this.vx += (wantTVx - this.vx) * 0.065;
+                this.vy += (wantTVy - this.vy) * 0.065;
+                var maxVyW = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
+                this.vy = Math.max(-maxVyW, Math.min(maxVyW, this.vy));
                 if (this.vx > 0.03) this.dir = 1;
                 else if (this.vx < -0.03) this.dir = -1;
             }
@@ -1283,13 +1274,15 @@
             this.vy *= this.friction;
             this.vy += surfacePull * 0.35;
 
-            let currentSpeedMul = window.speedMultiplier !== undefined ? window.speedMultiplier : 0.5;
-            let curVx = this.vx * currentSpeedMul * o2Mult;
-            var dTargetY = this.targetY - this.y;
-            this.vy += (((dTargetY > 0 ? 1 : -1) * 0.6 * currentSpeedMul * o2Mult) - this.vy) * 0.05;
+            let speedMul = window.speedMultiplier !== undefined ? window.speedMultiplier : 0.5;
+            let curVx = this.vx * speedMul;
+            let dy = this.targetY - this.y;
+            this.vy += (((dy > 0 ? 1 : -1) * 0.6 * speedMul) - this.vy) * 0.05;
 
-            const margin = (this.w || 90) / 2 + 20;
-            if ((this.x > canvas.width - margin && this.vx > 0) || (this.x < margin && this.vx < 0)) {
+            if (
+                (this.x > canvasCssW - (this.w / 2 + 20) && this.vx > 0) ||
+                (this.x < this.w / 2 + 20 && this.vx < 0)
+            ) {
                 this.vx *= -1;
                 this.turnLag = 0.8;
             }
@@ -1301,14 +1294,13 @@
                 this.y = WATERLINE + 22;
                 this.vy *= 0.45;
             }
-            if (this.y > canvas.height - 36) {
-                this.y = canvas.height - 36;
+            if (this.y > canvasCssH - 36) {
+                this.y = canvasCssH - 36;
                 this.vy *= 0.45;
             }
 
-            let targetTilt = (this.vy / (Math.abs(curVx) || 1)) * 0.2;
-            const maxTilt = 0.15;
-            this.tilt += (Math.max(-maxTilt, Math.min(maxTilt, targetTilt)) - this.tilt) * 0.1;
+            this.tilt +=
+                (Math.max(-0.15, Math.min(0.15, (this.vy / (Math.abs(curVx) || 1)) * 0.2)) - this.tilt) * 0.1;
             this.pitchAngle = this.tilt;
 
             let targetFlip = this.vx > 0 ? 1 : -1;
@@ -1320,7 +1312,8 @@
             this.turnLag *= 0.92;
 
             if (Math.random() < 0.01) {
-                this.targetY = 100 + Math.random() * (canvas.height - 200);
+                this.targetX = Math.random() * canvasCssW;
+                this.targetY = 100 + Math.random() * (canvasCssH - 200);
             }
 
             var z = Math.abs(this.flipScale);
@@ -1378,11 +1371,20 @@
             ctx.rotate(this.tilt + (this.isDead ? 0 : this.turnTilt));
             ctx.scale(displayScaleX * currentSize, currentSize);
 
-            var tailSway = Math.sin(this.tailPhase) * 0.2;
-            var finalTailAngle = tailSway + (this.vx > 0 ? -this.turnLag : this.turnLag);
-            var wag = Math.sin(this.wagPhase) * 7 + finalTailAngle * 42;
+            var tailSway = Math.sin(this.tailPhase) * 0.15;
+            var tailFlex = Math.cos(this.tailPhase) * 0.25;
+            var turnEffect = this.vx > 0 ? -this.turnLag : this.turnLag;
+            var wag = Math.sin(this.wagPhase) * 7;
+            var tailPivotX = 280;
+            var tailPivotY = 248;
 
             ctx.translate(-150, -250);
+
+            ctx.save();
+            ctx.translate(tailPivotX, tailPivotY);
+            ctx.rotate(tailSway + turnEffect);
+            ctx.transform(1, tailFlex, 0, 1, 0, 0);
+            ctx.translate(-tailPivotX, -tailPivotY);
 
             this.breedObj.forEach((p, i) => {
                 ctx.save();
@@ -1391,6 +1393,7 @@
                 ctx.fill(new Path2D(p));
                 ctx.restore();
             });
+            ctx.restore();
 
             var bake = getBodyBakeCanvas(this);
             ctx.drawImage(bake, 0, 0, 720, 500);
@@ -1441,6 +1444,7 @@
                     baby.x = spawnX;
                     baby.y = spawnY;
                     baby.targetY = spawnY;
+                    baby.targetX = spawnX;
                     baby.wanderTx = spawnX;
                     baby.wanderTy = spawnY;
                     baby.vx = 0;
@@ -2023,6 +2027,7 @@
             breedKey: f.breedKey,
             x: f.x,
             y: f.y,
+            targetX: f.targetX,
             targetY: f.targetY,
             dir: f.dir,
             flipScale: f.flipScale,
@@ -2410,19 +2415,19 @@
         var airG = Math.max(0, Math.min(255, Math.round(wRgb.g * 0.8)));
         var airB = Math.max(0, Math.min(255, Math.round(wRgb.b * 0.8)));
         ctx.fillStyle = "rgb(" + airR + "," + airG + "," + airB + ")";
-        ctx.fillRect(0, 0, canvas.width, WATERLINE);
+        ctx.fillRect(0, 0, canvasCssW, WATERLINE);
         ctx.fillStyle = rgbStringFromHex(wHex);
-        ctx.fillRect(0, WATERLINE, canvas.width, canvas.height - WATERLINE);
+        ctx.fillRect(0, WATERLINE, canvasCssW, canvasCssH - WATERLINE);
         ctx.beginPath();
         ctx.moveTo(0, WATERLINE);
-        ctx.lineTo(canvas.width, WATERLINE);
+        ctx.lineTo(canvasCssW, WATERLINE);
         ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
         ctx.lineWidth = 2;
         ctx.stroke();
     }
 
     function loop() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, canvasCssW, canvasCssH);
 
         stepBreedingAnim();
         stepAutoBreedGenetics();
@@ -2458,7 +2463,7 @@
         drawWaterline();
         drawDecors();
 
-        foods = foods.filter((f) => !f.eaten && f.y < canvas.height);
+        foods = foods.filter((f) => !f.eaten && f.y < canvasCssH);
         ctx.fillStyle = "#e67e22";
         foods.forEach((f) => {
             f.y += 1.05;
