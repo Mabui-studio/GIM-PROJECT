@@ -801,7 +801,23 @@
     };
     const BODY_PATH = "M312.2,319.2h-180c-40.5,0-99-32.7-99-73.2v-1.5c0-40.5,58.7-73.2,99-73.2h180c40.5,0,105.5,32.7,105.5,73.2v1.5C417.8,286.5,352.7,319.2,312.2,319.2z";
     const EYE_PATH = "M102.6,215.7c0,18.7-15.2,33.9-33.9,33.9s-33.9-15.2-33.9-33.9s15.2-33.9,33.9-33.9S102.6,197,102.6,215.7z";
-    var FISH_PHYS = { yCapRatio: 0.3 };
+    var FISH_PHYS = { yCapRatio: 0.3, softMargin: 100, facingMomThresh: 0.14 };
+
+    /** Edge-weighted wander: ~55% chance to aim for left/right 20% bands (explore tank). */
+    function pickEdgeWeightedWanderTx() {
+        var w = canvasCssW;
+        var mg = 90;
+        if (w <= mg * 2) return w * 0.5;
+        var leftMax = Math.min(w * 0.2, w - mg);
+        var rightMin = Math.max(w * 0.8, mg);
+        if (Math.random() < 0.55) {
+            if (Math.random() < 0.5) {
+                return mg + Math.random() * Math.max(8, leftMax - mg);
+            }
+            return rightMin + Math.random() * Math.max(8, w - mg - rightMin);
+        }
+        return mg + Math.random() * (w - mg * 2);
+    }
 
     function assignPatternName(fish) {
         var rng = createRng([fish.id || "x", "pattern"]);
@@ -1040,7 +1056,6 @@
 
             this.age = parent1 && parent2 && !bredGameFish ? 0 : isWild ? 2 + Math.random() * 2 : 2;
             this.isRetired = this.age >= RETIRE_AGE;
-            this.isDead = false;
 
             this.vitality = 100;
             this.hunger = 0;
@@ -1076,18 +1091,21 @@
             this.tailPhase = Math.random() * Math.PI * 2;
             this.wagPhase = this.tailPhase;
             this.turnLag = 0;
-            this.friction = 0.98;
+            this.friction = 0.985;
             this.selected = false;
             this.breedingLocked = false;
             this.breedCooldownUntil = 0;
             this.breedCooldownUntilMs = 0;
             this.aiPhase = "cruise";
             this.aiTimer = 0;
-            this.wanderCooldown = 400 + Math.floor(Math.random() * 500);
+            this.wanderCooldown = 900 + Math.floor(Math.random() * 900);
             this.wanderTx = this.x;
             this.wanderTy = this.y;
             this.vx = this.dir * this.baseVx * this.personalSpeed;
             this.vy = 0;
+            this.pathVx = this.vx;
+            this.pathVy = 0;
+            this.facingDir = this.vx >= 0 ? 1 : -1;
             this.tailLag = 0;
             this.w = 90;
             this.bodyW = 52;
@@ -1128,7 +1146,6 @@
             this.tailColor = s.tailColor || (this.sex === "F" ? desaturate(this.tailHex, 0.3) : this.tailHex);
             this.age = typeof s.age === "number" ? s.age : 2;
             this.isRetired = this.age >= RETIRE_AGE;
-            this.isDead = !!s.isDead;
             this.vitality = typeof s.vitality === "number" ? s.vitality : 100;
             this.hunger = typeof s.hunger === "number" ? s.hunger : 0;
             this.breedKey = s.breedKey && BREEDS[s.breedKey] ? s.breedKey : "VEILTAIL";
@@ -1158,6 +1175,9 @@
             this.wanderTy = typeof s.wanderTy === "number" ? s.wanderTy : this.y;
             this.vx = typeof s.vx === "number" ? s.vx : this.dir * this.baseVx * this.personalSpeed;
             this.vy = typeof s.vy === "number" ? s.vy : 0;
+            this.pathVx = typeof s.pathVx === "number" ? s.pathVx : this.vx;
+            this.pathVy = typeof s.pathVy === "number" ? s.pathVy : this.vy;
+            this.facingDir = s.facingDir === -1 ? -1 : 1;
             this.tailLag = typeof s.tailLag === "number" ? s.tailLag : 0;
             this.w = typeof s.w === "number" ? s.w : 90;
             this.bodyW = typeof s.bodyW === "number" ? s.bodyW : 52;
@@ -1192,15 +1212,6 @@
         }
 
         update() {
-            if (this.isDead) {
-                if (!this.deadFloatPhase) this.deadFloatPhase = 0;
-                this.deadFloatPhase += 0.03;
-                this.x += Math.sin(this.deadFloatPhase * 0.4) * 0.35;
-                this.y = WATERLINE + 22 + Math.sin(this.deadFloatPhase) * 5;
-                db.waste = Math.min(100, db.waste + 0.018);
-                syncFishData(this);
-                return;
-            }
             if (breedingAnim && (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") && (this === breedingAnim.a || this === breedingAnim.b)) return;
 
             this.age += 1 / DAY_FRAMES;
@@ -1209,25 +1220,12 @@
             this.hunger += 0.015;
             if (this.hunger > 100) this.hunger = 100;
 
-            var wasteStress = 1 + db.waste * 0.025;
-            if (this.hunger >= 80 || db.waste >= 80) {
-                this.vitality -= 0.05 * wasteStress;
-            }
-            if (this.vitality <= 0) {
-                this.isDead = true;
-                this.deadFloatPhase = Math.random() * Math.PI * 2;
-                this.y = WATERLINE + 25;
-                this.vx = 0;
-                this.vy = 0;
-                this.tilt = 0;
-                this.pitchAngle = 0;
-                updateUI();
-                syncFishData(this);
-                return;
-            }
-
             var surfacePull = db.o2 < 32 ? (WATERLINE + 55 - this.y) * 0.004 : 0;
             var bs = this.baseVx * this.personalSpeed;
+            var sm = FISH_PHYS.softMargin;
+            var cx = canvasCssW * 0.5;
+            var steerK = 0.052;
+            var burstK = 0.14;
 
             let targetFood = null;
             let minDist = Infinity;
@@ -1251,7 +1249,7 @@
                 this.targetX = targetFood.x;
                 this.targetY = targetFood.y;
                 var wantVx = (fdx / fdist) * bs * 2.4;
-                this.vx += (wantVx - this.vx) * 0.11;
+                this.vx += (wantVx - this.vx) * burstK;
                 var wantVy = (fdy / fdist) * bs * 0.55;
                 this.vy += (wantVy - this.vy) * 0.06;
                 var maxVyChase = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
@@ -1260,24 +1258,34 @@
                 if (minDist < 28) {
                     targetFood.eaten = true;
                     this.hunger = 0;
-                    this.vitality = 100;
+                    this.vitality = Math.min(100, this.vitality + 8);
                     updateUI();
                 }
             } else {
+                var inLeft = this.x < sm;
+                var inRight = this.x > canvasCssW - sm;
+                if (inLeft || inRight) {
+                    var pushX = inLeft ? cx + canvasCssW * 0.22 : cx - canvasCssW * 0.22;
+                    this.targetX = pushX + (Math.random() - 0.5) * (canvasCssW * 0.12);
+                    this.wanderCooldown = Math.max(this.wanderCooldown, 240);
+                }
                 this.wanderCooldown--;
                 if (this.wanderCooldown <= 0) {
-                    this.wanderCooldown = 480 + Math.floor(Math.random() * 720);
+                    this.wanderCooldown = 1400 + Math.floor(Math.random() * 1400);
+                    this.targetX = pickEdgeWeightedWanderTx();
                     var mg = 90;
-                    this.targetX = mg + Math.random() * (canvasCssW - mg * 2);
                     this.targetY = WATERLINE + 50 + Math.random() * (canvasCssH - WATERLINE - 100);
+                    if (this.targetY > canvasCssH - mg) this.targetY = canvasCssH - mg;
                 }
                 var tdx = this.targetX - this.x;
                 var tdy = this.targetY - this.y;
                 var tdist = Math.hypot(tdx, tdy) + 1e-6;
                 var wantTVx = (tdx / tdist) * bs * 1.35;
                 var wantTVy = (tdy / tdist) * bs * 0.55;
-                this.vx += (wantTVx - this.vx) * 0.065;
-                this.vy += (wantTVy - this.vy) * 0.065;
+                this.vx += (wantTVx - this.vx) * steerK;
+                this.vy += (wantTVy - this.vy) * steerK;
+                if (inLeft) this.vx += burstK * bs * 1.1;
+                if (inRight) this.vx -= burstK * bs * 1.1;
                 var maxVyW = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
                 this.vy = Math.max(-maxVyW, Math.min(maxVyW, this.vy));
                 if (this.vx > 0.03) this.dir = 1;
@@ -1291,17 +1299,24 @@
             let speedMul = window.speedMultiplier !== undefined ? window.speedMultiplier : 0.5;
             let curVx = this.vx * speedMul;
 
-            if (
-                (this.x > canvasCssW - (this.w / 2 + 20) && this.vx > 0) ||
-                (this.x < this.w / 2 + 20 && this.vx < 0)
-            ) {
-                this.vx *= -1;
-                this.turnLag = 0.8;
+            var margin = this.w / 2 + 20;
+            var softL = sm;
+            var softR = canvasCssW - sm;
+            if (this.x > canvasCssW - margin && this.vx > 0) {
+                var penR = Math.max(0, (this.x - softR) / Math.max(1, margin));
+                this.vx -= penR * 0.22 * bs;
+                if (this.x > canvasCssW - 8) this.vx = Math.min(this.vx, -Math.abs(this.vx) * 0.35 - 0.06);
+                this.turnLag = Math.max(this.turnLag, 0.35 + penR * 0.45);
+            } else if (this.x < margin && this.vx < 0) {
+                var penL = Math.max(0, (softL - this.x) / Math.max(1, margin));
+                this.vx += penL * 0.22 * bs;
+                if (this.x < 8) this.vx = Math.max(this.vx, Math.abs(this.vx) * 0.35 + 0.06);
+                this.turnLag = Math.max(this.turnLag, 0.35 + penL * 0.45);
             }
 
             var moveStep = this.vx * speedMul * 3.2;
             this.x += moveStep;
-            this.y += this.vy;
+            this.y += this.vy * speedMul;
 
             if (this.y < WATERLINE + 22) {
                 this.y = WATERLINE + 22;
@@ -1312,14 +1327,24 @@
                 this.vy *= 0.45;
             }
 
-            this.tilt +=
-                (Math.max(-0.15, Math.min(0.15, (this.vy / (Math.abs(curVx) || 1)) * 0.2)) - this.tilt) * 0.1;
+            var pathDx = chasing ? targetFood.x - this.x : this.targetX - this.x;
+            var pathDy = chasing ? targetFood.y - this.y : this.targetY - this.y;
+            var pathDist = Math.hypot(pathDx, pathDy) + 1e-6;
+            this.pathVx = pathDx / pathDist;
+            this.pathVy = pathDy / pathDist;
+            var pathHoriz = Math.abs(this.pathVx) > 0.12 ? this.pathVx : this.facingDir;
+            var tiltFromPath =
+                (this.pathVy / (Math.abs(pathHoriz) + 0.35)) * 0.18;
+            tiltFromPath = Math.max(-0.15, Math.min(0.15, tiltFromPath));
+            this.tilt += (tiltFromPath - this.tilt) * 0.12;
             this.pitchAngle = this.tilt;
 
-            var faceFromMotion = moveStep > 0.0008 ? 1 : moveStep < -0.0008 ? -1 : null;
-            if (faceFromMotion !== null) {
-                this.visualScaleX += (faceFromMotion - this.visualScaleX) * 0.18;
+            var mom = this.vx;
+            if (Math.abs(mom) > FISH_PHYS.facingMomThresh) {
+                this.facingDir = mom > 0 ? 1 : -1;
             }
+            var faceGoal = this.facingDir;
+            this.visualScaleX += (faceGoal - this.visualScaleX) * 0.11;
             this.flipScale = this.visualScaleX;
 
             this.tailPhase += 0.042 + Math.abs(curVx) * 0.016;
@@ -1337,12 +1362,7 @@
             ctx.save();
             ctx.translate(this.x, this.y);
 
-            if (this.isDead) {
-                ctx.rotate(Math.PI);
-                ctx.translate(0, -14);
-            }
-
-            if (showHealthBars && !this.isDead) {
+            if (showHealthBars) {
                 ctx.fillStyle = "rgba(0,0,0,0.5)";
                 ctx.fillRect(-20, -50, 40, 6);
                 let hc = this.hunger < 50 ? "#10b981" : this.hunger < 80 ? "#f59e0b" : "#ef4444";
@@ -1351,7 +1371,6 @@
             }
 
             if (currentMode === "breeding" && this.isRetired) ctx.globalAlpha = 0.3;
-            if (this.isDead) ctx.globalAlpha = 0.55;
 
             if (this.selected) {
                 ctx.beginPath();
@@ -1379,7 +1398,7 @@
             var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : swimFacing;
             var flip = rawDraw;
             var displayScaleX = Math.abs(flip) < 0.4 ? (flip > 0 ? 0.4 : -0.4) : flip;
-            ctx.rotate(this.tilt + (this.isDead ? 0 : this.turnTilt));
+            ctx.rotate(this.tilt + this.turnTilt);
             ctx.scale(displayScaleX * currentSize, currentSize);
 
             var tailSway = Math.sin(this.tailPhase) * 0.1;
@@ -1460,6 +1479,8 @@
                     baby.wanderTy = spawnY;
                     baby.vx = 0;
                     baby.vy = 0;
+                    baby.pathVx = 0;
+                    baby.pathVy = 0;
                     baby.tailLag = 0;
                     baby.turnLag = 0;
                     fishes.push(baby);
@@ -1540,7 +1561,6 @@
         applyFishDrift(fishesArr) {
             var self = this;
             fishesArr.forEach(function (fish) {
-                if (fish.isDead) return;
                 for (var pi = 0; pi < 12; pi++) {
                     var p = self.points[pi];
                     var d = Math.hypot(fish.x - p.x, fish.y - p.y);
@@ -1905,7 +1925,6 @@
         });
 
         if (clickedFish) {
-            if (clickedFish.isDead && currentMode === "breeding") return;
             if (currentMode === "breeding") {
                 if (clickedFish.isRetired) return;
                 if (clickedFish.age < 2) {
@@ -2018,7 +2037,6 @@
             "<b>ความสมบูรณ์ (Vitality):</b> " +
             f.vitality.toFixed(0) +
             "%" +
-            (f.isDead ? " <span style='color:#64748b'>(เสียชีวิต — ตักศพเพื่อลด Waste)</span>" : "") +
             "<br>" +
             "<b>สู้ (HP/ATK/DEF/SPD):</b> " +
             Math.round(eff.hp) +
@@ -2112,7 +2130,6 @@
         var females = fishes.filter(function (f) {
             return (
                 f.sex === "F" &&
-                !f.isDead &&
                 !f.isRetired &&
                 f.age >= 2 &&
                 !f.breedingLocked &&
@@ -2122,7 +2139,6 @@
         var males = fishes.filter(function (f) {
             return (
                 f.sex === "M" &&
-                !f.isDead &&
                 !f.isRetired &&
                 f.age >= 2 &&
                 !f.breedingLocked &&
@@ -2152,12 +2168,7 @@
     function sellSelectedFish() {
         if (selectedFishes.length === 1) {
             var sf = selectedFishes[0];
-            if (sf.isDead) {
-                db.waste = Math.max(0, db.waste - 12);
-                db.carePoints += 1;
-            } else {
-                db.gold += sf.calcPrice();
-            }
+            db.gold += sf.calcPrice();
             fishes = fishes.filter((f) => f !== sf);
             selectedFishes = [];
             document.getElementById("panel-left").classList.remove("open");
@@ -2337,7 +2348,6 @@
             tailColor: f.tailColor,
             age: f.age,
             isRetired: f.isRetired,
-            isDead: f.isDead,
             vitality: f.vitality,
             hunger: f.hunger,
             breedKey: f.breedKey,
@@ -2365,6 +2375,9 @@
             wanderCooldown: f.wanderCooldown,
             wanderTx: f.wanderTx,
             wanderTy: f.wanderTy,
+            pathVx: f.pathVx,
+            pathVy: f.pathVy,
+            facingDir: f.facingDir,
             vx: f.vx,
             vy: f.vy,
             tailLag: f.tailLag,
@@ -2374,7 +2387,6 @@
             _parentBaseClassB: f._parentBaseClassB,
             injuredHealCdUntil: f.injuredHealCdUntil,
             displayName: f.displayName,
-            deadFloatPhase: f.deadFloatPhase,
         };
     }
 
@@ -2720,9 +2732,7 @@
 
         db.timer++;
 
-        var liveFish = fishes.filter(function (f) {
-            return !f.isDead;
-        }).length;
+        var liveFish = fishes.length;
         db.o2 = Math.min(100, Math.max(0, 100 - liveFish * 5 + decors.length * 15));
         db.waste = Math.min(100, Math.max(0, db.waste + liveFish * 0.01 - decors.length * 0.05));
 
@@ -2737,7 +2747,7 @@
             if (nowMs - db.lastAutoFeedMs >= 4000) {
                 db.lastAutoFeedMs = nowMs;
                 var hungryFish = fishes.find(function (f) {
-                    return !f.isDead && f.hunger > 60;
+                    return f.hunger > 60;
                 });
                 if (hungryFish) {
                     db.foodCount--;
