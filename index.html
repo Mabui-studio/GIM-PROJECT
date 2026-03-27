@@ -1383,9 +1383,9 @@
                 fish.y += (dy / len) * step;
                 return false;
             }
-            var da = Math.hypot(mx - a.x, my - a.y);
-            var db = Math.hypot(mx - b.x, my - b.y);
-            if (da < 2 && db < 2) {
+            var distA = Math.hypot(mx - a.x, my - a.y);
+            var distB = Math.hypot(mx - b.x, my - b.y);
+            if (distA < 2 && distB < 2) {
                 a.x = mx;
                 a.y = my;
                 b.x = mx;
@@ -1414,6 +1414,10 @@
                 b.breedCooldownUntil = db.timer + cdFrames;
                 a.breedCooldownUntilMs = Date.now() + cdMs;
                 b.breedCooldownUntilMs = Date.now() + cdMs;
+                a.x = mx - 22;
+                b.x = mx + 22;
+                a.y = my;
+                b.y = my;
                 breedingAnim = null;
             }
         }
