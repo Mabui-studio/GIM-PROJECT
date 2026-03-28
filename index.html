@@ -12,8 +12,8 @@
             display: block;
             position: fixed;
             inset: 0;
-            width: 100%;
-            height: 100%;
+            width: 100vw;
+            height: 100vh;
             z-index: 0;
             touch-action: none;
             cursor: crosshair;
@@ -130,6 +130,7 @@
             <button class="action-btn" style="background:#f59e0b;" onclick="buyFood()">ซื้ออาหาร x10 (100 💰)</button>
             <button class="action-btn" style="background:#8b5cf6;" onclick="buyRandomFish()">🎁 สุ่มปลาป่า (500 💰)</button>
             <button class="action-btn" style="background:#10b981;" onclick="enterDecorMode()">🌿 ซื้อสาหร่ายเพิ่ม O2 (300 💰)</button>
+            <button type="button" class="action-btn" style="background:#059669;" onclick="toggleSeaweedEditMode()">🎨 แก้ไขสาหร่าย (Seaweed Edit)</button>
             
             <hr style="margin:20px 0; border:0; border-top:1px solid #e2e8f0;">
             <h3>🌊 Fluid V9.1 — ความเร็วว่าย</h3>
@@ -141,6 +142,11 @@
             <h3>⚙️ ระบบอัตโนมัติ (Auto)</h3>
             <button class="action-btn" id="btn-autofeeder" style="background:#3b82f6;" onclick="buyAutoFeeder()">🤖 ซื้อเครื่องให้อาหาร (1000 💰)</button>
             
+            <hr style="margin:20px 0; border:0; border-top:1px solid #e2e8f0;">
+            <h3>💾 Reset Local data</h3>
+            <p style="font-size:0.8rem; color:#64748b; margin:0 0 8px;">ลบเซฟในเบราว์เซอร์เครื่องนี้ แล้วโหลดหน้าใหม่ (เริ่มเลือกปลาใหม่)</p>
+            <button type="button" class="action-btn" style="background:#b91c1c;" onclick="resetLocalData()">🗑️ ล้างข้อมูลในเครื่อง</button>
+
             <hr style="margin:20px 0; border:0; border-top:1px solid #e2e8f0;">
             <h3>🌊 สีน้ำในตู้ (พาสเทล)</h3>
             <p style="font-size:0.8rem; color:#64748b; margin:0 0 10px;">คลิกวงกลม = สีตู้ทันที · ตามเวลา = กลางวันสว่าง / กลางคืนนุ่มขึ้น</p>
@@ -726,6 +732,8 @@
 
     const canvas = document.getElementById("aquarium");
     const ctx = canvas.getContext("2d");
+    var canvasCssW = window.innerWidth;
+    var canvasCssH = window.innerHeight;
 
     // --- DB & Game State ---
     let db = {
@@ -747,7 +755,11 @@
         eggs = [];
     let selectedFishes = [];
     let fishIdCounter = 1;
-    let currentMode = "normal"; // 'normal', 'decor', 'breeding'
+    let decorIdCounter = 1;
+    let seaweedEditMode = false;
+    let selectedSeaweed = null;
+    let seaweedHandleDrag = null;
+    let currentMode = "normal"; // 'normal', 'decor', 'breeding', 'seaweed_edit'
     let isZenMode = false;
     let showHealthBars = false;
     /** @type {{ phase: string, t: number, a: MajesticBetta, b: MajesticBetta, startAx: number, startAy: number, startBx: number, startBy: number, mx: number, my: number, approachVel: number } | null} */
@@ -794,6 +806,8 @@
     };
     const BODY_PATH = "M312.2,319.2h-180c-40.5,0-99-32.7-99-73.2v-1.5c0-40.5,58.7-73.2,99-73.2h180c40.5,0,105.5,32.7,105.5,73.2v1.5C417.8,286.5,352.7,319.2,312.2,319.2z";
     const EYE_PATH = "M102.6,215.7c0,18.7-15.2,33.9-33.9,33.9s-33.9-15.2-33.9-33.9s15.2-33.9,33.9-33.9S102.6,197,102.6,215.7z";
+    /** ลำตัว/ตาอยู่ฝั่ง x ต่ำ (~70) หางฝั่ง x สูง — scaleX บวก = หัวชี้ซ้ายจอ ต้องกลับเทียบกับทิศว่าย (vx) */
+    const FISH_ART_HEAD_POINTS_LOCAL_MINUS_X = true;
     var FISH_PHYS = { yCapRatio: 0.3 };
 
     function assignPatternName(fish) {
@@ -934,9 +948,13 @@
     }
 
     function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        WATERLINE = canvas.height * 0.15;
+        var dpr = window.devicePixelRatio || 1;
+        canvasCssW = window.innerWidth;
+        canvasCssH = window.innerHeight;
+        canvas.width = canvasCssW * dpr;
+        canvas.height = canvasCssH * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        WATERLINE = canvasCssH * 0.15;
     }
     window.addEventListener("resize", resize);
     resize();
@@ -1029,7 +1047,6 @@
 
             this.age = parent1 && parent2 && !bredGameFish ? 0 : isWild ? 2 + Math.random() * 2 : 2;
             this.isRetired = this.age >= RETIRE_AGE;
-            this.isDead = false;
 
             this.vitality = 100;
             this.hunger = 0;
@@ -1053,9 +1070,10 @@
             this.breedKey = rollTailBreedKey(createRng([this.id, "tail"]));
             this.breedObj = BREEDS[this.breedKey];
 
-            this.x = canvas.width / 2 + (Math.random() * 200 - 100);
+            this.x = canvasCssW / 2 + (Math.random() * 200 - 100);
             this.y = parent1 && parent2 && !bredGameFish ? WATERLINE + 20 : WATERLINE + 100 + Math.random() * 200;
             this.targetY = this.y;
+            this.targetX = this.x;
             this.dir = Math.random() > 0.5 ? 1 : -1;
             this.personalSpeed = 0.4 + Math.random() * 0.3;
             this.baseVx = 0.5;
@@ -1064,13 +1082,14 @@
             this.tailPhase = Math.random() * Math.PI * 2;
             this.wagPhase = this.tailPhase;
             this.turnLag = 0;
-            this.friction = 0.98;
+            this.friction = 0.985;
             this.selected = false;
             this.breedingLocked = false;
             this.breedCooldownUntil = 0;
             this.breedCooldownUntilMs = 0;
             this.aiPhase = "cruise";
             this.aiTimer = 0;
+            this.decisionTimer = 0;
             this.wanderTx = this.x;
             this.wanderTy = this.y;
             this.vx = this.dir * this.baseVx * this.personalSpeed;
@@ -1115,14 +1134,14 @@
             this.tailColor = s.tailColor || (this.sex === "F" ? desaturate(this.tailHex, 0.3) : this.tailHex);
             this.age = typeof s.age === "number" ? s.age : 2;
             this.isRetired = this.age >= RETIRE_AGE;
-            this.isDead = !!s.isDead;
             this.vitality = typeof s.vitality === "number" ? s.vitality : 100;
             this.hunger = typeof s.hunger === "number" ? s.hunger : 0;
             this.breedKey = s.breedKey && BREEDS[s.breedKey] ? s.breedKey : "VEILTAIL";
             this.breedObj = BREEDS[this.breedKey];
-            this.x = typeof s.x === "number" ? s.x : canvas.width * 0.5;
+            this.x = typeof s.x === "number" ? s.x : canvasCssW * 0.5;
             this.y = typeof s.y === "number" ? s.y : WATERLINE + 120;
             this.targetY = typeof s.targetY === "number" ? s.targetY : this.y;
+            this.targetX = typeof s.targetX === "number" ? s.targetX : this.x;
             this.dir = s.dir === -1 ? -1 : 1;
             this.flipScale = typeof s.flipScale === "number" ? s.flipScale : this.dir;
             this.turnTilt = typeof s.turnTilt === "number" ? s.turnTilt : 0;
@@ -1150,6 +1169,7 @@
             this.visualScaleX =
                 typeof s.visualScaleX === "number" ? s.visualScaleX : typeof s.flipScale === "number" ? s.flipScale : this.vx > 0 ? 1 : -1;
             this.flipScale = this.visualScaleX;
+            this.decisionTimer = typeof s.decisionTimer === "number" ? s.decisionTimer : 0;
             this._parentSameRegion = s._parentSameRegion;
             this._parentBaseClassA = s._parentBaseClassA;
             this._parentBaseClassB = s._parentBaseClassB;
@@ -1176,16 +1196,26 @@
             return Math.floor(100 * this.rarity.multi * Math.min(2, Math.max(0.5, this.age / 2)));
         }
 
-        update() {
-            if (this.isDead) {
-                if (!this.deadFloatPhase) this.deadFloatPhase = 0;
-                this.deadFloatPhase += 0.03;
-                this.x += Math.sin(this.deadFloatPhase * 0.4) * 0.35;
-                this.y = WATERLINE + 22 + Math.sin(this.deadFloatPhase) * 5;
-                db.waste = Math.min(100, db.waste + 0.018);
-                syncFishData(this);
-                return;
+        /** Testing Mode wander: 70% near left/right within 200px of edges, 30% center band. */
+        pickNewTarget() {
+            var w = canvasCssW;
+            var edge = 200;
+            if (Math.random() < 0.7) {
+                if (Math.random() < 0.5) {
+                    this.targetX = Math.random() * Math.min(edge, w);
+                } else {
+                    this.targetX = w - Math.random() * Math.min(edge, w);
+                }
+            } else {
+                var lo = edge;
+                var hi = Math.max(lo + 1, w - edge);
+                this.targetX = lo + Math.random() * (hi - lo);
             }
+            this.targetY = WATERLINE + 50 + Math.random() * Math.max(20, canvasCssH - WATERLINE - 100);
+            if (this.targetY > canvasCssH - 36) this.targetY = canvasCssH - 36;
+        }
+
+        update() {
             if (breedingAnim && (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") && (this === breedingAnim.a || this === breedingAnim.b)) return;
 
             this.age += 1 / DAY_FRAMES;
@@ -1194,26 +1224,17 @@
             this.hunger += 0.015;
             if (this.hunger > 100) this.hunger = 100;
 
-            var wasteStress = 1 + db.waste * 0.025;
-            if (this.hunger >= 80 || db.waste >= 80) {
-                this.vitality -= 0.05 * wasteStress;
-            }
-            if (this.vitality <= 0) {
-                this.isDead = true;
-                this.deadFloatPhase = Math.random() * Math.PI * 2;
-                this.y = WATERLINE + 25;
-                this.vx = 0;
-                this.vy = 0;
-                this.tilt = 0;
-                this.pitchAngle = 0;
-                updateUI();
-                syncFishData(this);
-                return;
-            }
+            // --- Testing Mode (God): immortal; hunger does not affect vitality ---
+            this.vitality = 100;
 
-            var o2Mult = 0.38 + (db.o2 / 100) * 0.62;
+            if (!this.gameFish) this.gameFish = buildGameFishForMajestic(this);
+            var eff = computeEffectiveBaseStats(this.gameFish);
+            var baseSpeed = (eff.spd / 100) * 1.8;
+            var decisionFreq = 200 + eff.def * 2;
+            var deviation = (this.gameFish.precisionScore - 0.5) * 0.3;
+            var accelMag = 0.05 * (baseSpeed + deviation);
+
             var surfacePull = db.o2 < 32 ? (WATERLINE + 55 - this.y) * 0.004 : 0;
-            var bs = this.baseVx * this.personalSpeed;
 
             let targetFood = null;
             let minDist = Infinity;
@@ -1230,98 +1251,89 @@
             var chasing = targetFood && minDist < 400;
 
             if (chasing) {
-                var dx = targetFood.x - this.x;
-                var dy = targetFood.y - this.y;
-                var dist = Math.hypot(dx, dy) + 1e-6;
-                this.dir = dx > 0 ? 1 : -1;
+                this.targetX = targetFood.x;
                 this.targetY = targetFood.y;
-                var wantVx = (dx / dist) * bs * 2.4;
-                this.vx += (wantVx - this.vx) * 0.11;
-                var wantVy = (dy / dist) * bs * 0.55;
-                this.vy += (wantVy - this.vy) * 0.06;
+            }
+
+            var aimX = chasing ? this.targetX : this.targetX;
+            var aimY = chasing ? this.targetY : this.targetY;
+            var tdx = aimX - this.x;
+            var tdy = aimY - this.y;
+            var tdist = Math.hypot(tdx, tdy) + 1e-6;
+
+            if (!chasing) {
+                this.decisionTimer++;
+                if (this.decisionTimer > decisionFreq || tdist < 40) {
+                    this.pickNewTarget();
+                    this.decisionTimer = Math.random() * 50;
+                }
+                tdx = this.targetX - this.x;
+                tdy = this.targetY - this.y;
+                tdist = Math.hypot(tdx, tdy) + 1e-6;
+            }
+
+            var useAccel = chasing ? accelMag * 2.2 : accelMag;
+            if (tdist > 5) {
+                this.vx += (tdx / tdist) * useAccel;
+                this.vy += (tdy / tdist) * useAccel * 0.85;
+            }
+
+            if (chasing) {
                 var maxVyChase = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
                 this.vy = Math.max(-maxVyChase, Math.min(maxVyChase, this.vy));
-
-                if (minDist < 28) {
-                    targetFood.eaten = true;
-                    this.hunger = 0;
-                    this.vitality = 100;
-                    updateUI();
-                }
             } else {
-                this.aiTimer--;
-                if (this.aiTimer <= 0) {
-                    this.aiTimer = 90 + Math.floor(Math.random() * 120);
-                    if (this.aiPhase === "cruise") {
-                        this.aiPhase = Math.random() < 0.55 ? "drift" : "hover";
-                        var mg = 70;
-                        this.wanderTx = mg + Math.random() * (canvas.width - mg * 2);
-                        this.wanderTy = WATERLINE + 45 + Math.random() * (canvas.height - WATERLINE - 90);
-                    } else {
-                        this.aiPhase = "cruise";
-                    }
-                }
-                this.targetY = this.wanderTy;
-                var wdx = this.wanderTx - this.x;
-                var wdy = this.wanderTy - this.y;
-                var wdist = Math.hypot(wdx, wdy);
-                var wantVx = 0;
-                var wantVy = 0;
-                if (wdist > 8) {
-                    wantVx = (wdx / wdist) * bs * (this.aiPhase === "drift" ? 1.9 : 1.35);
-                    wantVy = (wdy / wdist) * bs * 0.45;
-                }
-                this.vx += (wantVx - this.vx) * 0.08;
-                var maxVy = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
-                this.vy += (wantVy - this.vy) * 0.08;
-                this.vy = Math.max(-maxVy, Math.min(maxVy, this.vy));
-                if (this.vx > 0.03) this.dir = 1;
-                else if (this.vx < -0.03) this.dir = -1;
+                var maxVyW = Math.abs(this.vx) * FISH_PHYS.yCapRatio;
+                this.vy = Math.max(-maxVyW, Math.min(maxVyW, this.vy));
             }
 
-            this.vx *= this.friction;
-            this.vy *= this.friction;
+            this.vx *= 0.96;
+            this.vy *= 0.96;
             this.vy += surfacePull * 0.35;
 
-            let currentSpeedMul = window.speedMultiplier !== undefined ? window.speedMultiplier : 0.5;
-            let curVx = this.vx * currentSpeedMul * o2Mult;
-            var dTargetY = this.targetY - this.y;
-            this.vy += (((dTargetY > 0 ? 1 : -1) * 0.6 * currentSpeedMul * o2Mult) - this.vy) * 0.05;
-
-            const margin = (this.w || 90) / 2 + 20;
-            if ((this.x > canvas.width - margin && this.vx > 0) || (this.x < margin && this.vx < 0)) {
-                this.vx *= -1;
-                this.turnLag = 0.8;
+            if (chasing && minDist < 28) {
+                targetFood.eaten = true;
+                this.hunger = 0;
+                updateUI();
             }
 
-            this.x += curVx;
-            this.y += this.vy;
+            let speedMul = window.speedMultiplier !== undefined ? window.speedMultiplier : 0.5;
+            let curVx = this.vx * speedMul;
+
+            var margin = this.w / 2 + 20;
+            if (this.x > canvasCssW - margin && this.vx > 0) {
+                this.vx *= -0.55;
+                this.turnLag = Math.max(this.turnLag, 0.5);
+            } else if (this.x < margin && this.vx < 0) {
+                this.vx *= -0.55;
+                this.turnLag = Math.max(this.turnLag, 0.5);
+            }
+
+            this.x += this.vx * speedMul * 3.2;
+            this.y += this.vy * speedMul;
 
             if (this.y < WATERLINE + 22) {
                 this.y = WATERLINE + 22;
                 this.vy *= 0.45;
             }
-            if (this.y > canvas.height - 36) {
-                this.y = canvas.height - 36;
+            if (this.y > canvasCssH - 36) {
+                this.y = canvasCssH - 36;
                 this.vy *= 0.45;
             }
 
-            let targetTilt = (this.vy / (Math.abs(curVx) || 1)) * 0.2;
-            const maxTilt = 0.15;
-            this.tilt += (Math.max(-maxTilt, Math.min(maxTilt, targetTilt)) - this.tilt) * 0.1;
+            this.tilt = Math.atan2(this.vy, Math.abs(this.vx) + 0.1) * 0.6;
             this.pitchAngle = this.tilt;
 
-            let targetFlip = this.vx > 0 ? 1 : -1;
-            this.visualScaleX += (targetFlip - this.visualScaleX) * 0.1;
+            var faceAimX = chasing ? targetFood.x : this.targetX;
+            var aimFacing = faceAimX > this.x ? 1 : -1;
+            var vxEps = 0.04;
+            var targetFacing = Math.abs(this.vx) > vxEps ? (this.vx > 0 ? 1 : -1) : aimFacing;
+            this.dir = targetFacing;
+            this.visualScaleX += (targetFacing - this.visualScaleX) * 0.12;
             this.flipScale = this.visualScaleX;
 
-            this.tailPhase += 0.15 + Math.abs(curVx) * 0.05;
+            this.tailPhase += 0.042 + Math.abs(curVx) * 0.016;
             this.wagPhase = this.tailPhase;
             this.turnLag *= 0.92;
-
-            if (Math.random() < 0.01) {
-                this.targetY = 100 + Math.random() * (canvas.height - 200);
-            }
 
             var z = Math.abs(this.flipScale);
             var curve = z < 0.55 ? this.dir * (0.55 - z) * 0.95 : 0;
@@ -1334,12 +1346,7 @@
             ctx.save();
             ctx.translate(this.x, this.y);
 
-            if (this.isDead) {
-                ctx.rotate(Math.PI);
-                ctx.translate(0, -14);
-            }
-
-            if (showHealthBars && !this.isDead) {
+            if (showHealthBars) {
                 ctx.fillStyle = "rgba(0,0,0,0.5)";
                 ctx.fillRect(-20, -50, 40, 6);
                 let hc = this.hunger < 50 ? "#10b981" : this.hunger < 80 ? "#f59e0b" : "#ef4444";
@@ -1348,7 +1355,6 @@
             }
 
             if (currentMode === "breeding" && this.isRetired) ctx.globalAlpha = 0.3;
-            if (this.isDead) ctx.globalAlpha = 0.55;
 
             if (this.selected) {
                 ctx.beginPath();
@@ -1372,25 +1378,41 @@
                 (breedingAnim.phase === "approach" || breedingAnim.phase === "kiss") &&
                 (this === breedingAnim.a || this === breedingAnim.b);
             var otherFish = facePartner ? (this === breedingAnim.a ? breedingAnim.b : breedingAnim.a) : null;
-            var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : this.visualScaleX;
+            var swimFacing = this.visualScaleX >= 0 ? 1 : -1;
+            var rawDraw = facePartner && otherFish ? (otherFish.x >= this.x ? 1 : -1) : swimFacing;
             var flip = rawDraw;
-            var displayScaleX = Math.abs(flip) < 0.4 ? (flip > 0 ? 0.4 : -0.4) : flip;
-            ctx.rotate(this.tilt + (this.isDead ? 0 : this.turnTilt));
-            ctx.scale(displayScaleX * currentSize, currentSize);
+            var clampedFlip = Math.abs(flip) < 0.4 ? (flip > 0 ? 0.4 : -0.4) : flip;
+            var drawFlip = FISH_ART_HEAD_POINTS_LOCAL_MINUS_X ? -clampedFlip : clampedFlip;
+            ctx.rotate(this.tilt + this.turnTilt);
+            ctx.scale(drawFlip * currentSize, currentSize);
 
-            var tailSway = Math.sin(this.tailPhase) * 0.2;
-            var finalTailAngle = tailSway + (this.vx > 0 ? -this.turnLag : this.turnLag);
-            var wag = Math.sin(this.wagPhase) * 7 + finalTailAngle * 42;
+            var tailSway = Math.sin(this.tailPhase) * 0.1;
+            var tailFlex = Math.cos(this.tailPhase) * 0.16;
+            var turnEffect = this.visualScaleX >= 0 ? -this.turnLag : this.turnLag;
+            if (FISH_ART_HEAD_POINTS_LOCAL_MINUS_X && clampedFlip > 0) turnEffect = -turnEffect;
+            var wag = Math.sin(this.wagPhase) * 4;
+            var tailPivotX = 280;
+            var tailPivotY = 248;
 
             ctx.translate(-150, -250);
 
+            ctx.save();
+            ctx.translate(tailPivotX, tailPivotY);
+            ctx.rotate(tailSway + turnEffect);
+            ctx.transform(1, tailFlex, 0, 1, 0, 0);
+            ctx.translate(-tailPivotX, -tailPivotY);
+
             this.breedObj.forEach((p, i) => {
                 ctx.save();
-                if (i === 0) ctx.translate(wag, 0);
+                if (i === 0) {
+                    var wagX = FISH_ART_HEAD_POINTS_LOCAL_MINUS_X && clampedFlip > 0 ? -wag : wag;
+                    ctx.translate(wagX, 0);
+                }
                 ctx.fillStyle = this.tailColor;
                 ctx.fill(new Path2D(p));
                 ctx.restore();
             });
+            ctx.restore();
 
             var bake = getBodyBakeCanvas(this);
             ctx.drawImage(bake, 0, 0, 720, 500);
@@ -1441,6 +1463,7 @@
                     baby.x = spawnX;
                     baby.y = spawnY;
                     baby.targetY = spawnY;
+                    baby.targetX = spawnX;
                     baby.wanderTx = spawnX;
                     baby.wanderTy = spawnY;
                     baby.vx = 0;
@@ -1468,6 +1491,255 @@
             ctx.restore();
         }
     }
+
+    class Seaweed {
+        constructor(baseX, baseY, h, restore) {
+            this.type = "seaweedV2";
+            this.id = "SW-" + String(decorIdCounter++).padStart(4, "0");
+            this.baseX = baseX;
+            this.baseY = baseY;
+            this.h = h != null ? h : 160;
+            this.segmentRest = this.h / 11;
+            this.baseStiffness = 0.8;
+            this.tipStiffness = 0.75;
+            this.damping = 0.5;
+            this.phase = Math.random() * Math.PI * 2;
+            this.points = [];
+            if (restore && restore.points && restore.points.length === 12) {
+                for (var ri = 0; ri < 12; ri++) {
+                    var rp = restore.points[ri];
+                    this.points.push({
+                        x: rp.x,
+                        y: rp.y,
+                        ox: rp.ox != null ? rp.ox : rp.x,
+                        oy: rp.oy != null ? rp.oy : rp.y,
+                    });
+                }
+                if (restore.id) {
+                    this.id = restore.id;
+                    var m = /^SW-(\d+)$/i.exec(this.id);
+                    if (m) {
+                        var nn = parseInt(m[1], 10);
+                        if (!isNaN(nn) && nn >= decorIdCounter) decorIdCounter = nn + 1;
+                    }
+                }
+            } else {
+                for (var i = 0; i < 12; i++) {
+                    var py = baseY - i * this.segmentRest;
+                    this.points.push({ x: baseX, y: py, ox: baseX, oy: py });
+                }
+            }
+        }
+
+        rebuildHeight(newH) {
+            this.h = Math.max(80, Math.min(420, newH));
+            this.segmentRest = this.h / 11;
+            var bx = this.baseX;
+            var by = this.baseY;
+            for (var i = 0; i < 12; i++) {
+                var py = by - i * this.segmentRest;
+                this.points[i].x = bx;
+                this.points[i].y = py;
+                this.points[i].ox = bx;
+                this.points[i].oy = py;
+            }
+        }
+
+        applyFishDrift(fishesArr) {
+            var self = this;
+            fishesArr.forEach(function (fish) {
+                for (var pi = 0; pi < 12; pi++) {
+                    var p = self.points[pi];
+                    var d = Math.hypot(fish.x - p.x, fish.y - p.y);
+                    if (d < 55 && d > 1) {
+                        var nx = (p.x - fish.x) / d;
+                        var ny = (p.y - fish.y) / d;
+                        var push = (55 - d) * 0.006;
+                        p.x += nx * push + fish.vx * 0.035;
+                        p.y += ny * push + fish.vy * 0.025;
+                    }
+                }
+            });
+        }
+
+        update() {
+            var sway = Math.sin(db.timer * 0.014 + this.phase + this.baseX * 0.004) * 2.2;
+            this.points[0].x = this.baseX + sway;
+            this.points[0].y = this.baseY;
+            this.points[0].ox = this.points[0].x;
+            this.points[0].oy = this.points[0].y;
+
+            for (var i = 1; i < 12; i++) {
+                var p = this.points[i];
+                var vx = p.x - p.ox;
+                var vy = p.y - p.oy;
+                var t = (i - 1) / 11;
+                var stiff = this.baseStiffness + t * (this.tipStiffness - this.baseStiffness);
+                var damp = 1 - this.damping * 0.35;
+                p.ox = p.x;
+                p.oy = p.y;
+                p.x += vx * stiff * damp + sway * 0.08 * t;
+                p.y += vy * stiff * damp - 0.02 * t;
+            }
+
+            for (var c = 0; c < 4; c++) {
+                for (var j = 0; j < 11; j++) {
+                    var a = this.points[j];
+                    var b = this.points[j + 1];
+                    var dx = b.x - a.x;
+                    var dy = b.y - a.y;
+                    var dist = Math.hypot(dx, dy) + 1e-6;
+                    var diff = (dist - this.segmentRest) / dist;
+                    var mx = dx * diff * 0.5;
+                    var my = dy * diff * 0.5;
+                    if (j > 0) {
+                        a.x += mx;
+                        a.y += my;
+                    }
+                    b.x -= mx;
+                    b.y -= my;
+                }
+                this.points[0].x = this.baseX + sway;
+                this.points[0].y = this.baseY;
+            }
+        }
+
+        draw() {
+            var pts = this.points;
+            if (!pts || pts.length < 12) return;
+            var amp = 15;
+            var teeth = 0.85;
+
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+
+            for (var i = 0; i < 11; i++) {
+                var p0 = pts[i];
+                var p1 = pts[i + 1];
+                var dx = p1.x - p0.x;
+                var dy = p1.y - p0.y;
+                var len = Math.hypot(dx, dy) + 1e-6;
+                var px = -dy / len;
+                var py = dx / len;
+                var seg = 6;
+                for (var s = 1; s <= seg; s++) {
+                    var u = s / seg;
+                    var bx = p0.x + dx * u;
+                    var by = p0.y + dy * u;
+                    var wobble = Math.sin((i * seg + s) * teeth + this.phase + db.timer * 0.08) * amp * (0.35 + u * 0.65);
+                    ctx.lineTo(bx + px * wobble, by + py * wobble);
+                }
+            }
+
+            var tip = pts[11];
+            var tPrev = pts[10];
+            var tdx = tip.x - tPrev.x;
+            var tdy = tip.y - tPrev.y;
+            var tlen = Math.hypot(tdx, tdy) + 1e-6;
+            var nx = -tdy / tlen;
+            var ny = tdx / tlen;
+            ctx.quadraticCurveTo(tip.x + nx * 10, tip.y + ny * 10, tip.x - nx * 4, tip.y - tlen * 0.08);
+
+            for (var j = 10; j >= 0; j--) {
+                var q0 = pts[j + 1];
+                var q1 = pts[j];
+                var qdx = q1.x - q0.x;
+                var qdy = q1.y - q0.y;
+                var qlen = Math.hypot(qdx, qdy) + 1e-6;
+                var qpx = -qdy / qlen;
+                var qpy = qdx / qlen;
+                var seg2 = 6;
+                for (var t2 = 1; t2 <= seg2; t2++) {
+                    var u2 = t2 / seg2;
+                    var lx = q0.x + qdx * u2;
+                    var ly = q0.y + qdy * u2;
+                    var w2 = Math.sin((j * seg2 + t2 + 17) * teeth + this.phase) * amp * (0.35 + (1 - u2) * 0.65);
+                    ctx.lineTo(lx - qpx * w2, ly - qpy * w2);
+                }
+            }
+            ctx.closePath();
+
+            var g = ctx.createLinearGradient(this.baseX, this.baseY, tip.x, tip.y - this.h * 0.2);
+            g.addColorStop(0, "rgb(18, 72, 42)");
+            g.addColorStop(0.55, "rgb(42, 120, 72)");
+            g.addColorStop(1, "rgb(130, 200, 150)");
+            ctx.fillStyle = g;
+            ctx.globalAlpha = 0.88;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
+        bounds() {
+            var minX = Infinity,
+                maxX = -Infinity,
+                minY = Infinity,
+                maxY = -Infinity;
+            for (var i = 0; i < this.points.length; i++) {
+                var p = this.points[i];
+                minX = Math.min(minX, p.x);
+                maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            }
+            return { minX: minX, maxX: maxX, minY: minY, maxY: maxY, cx: (minX + maxX) / 2, topY: minY };
+        }
+
+        hitTest(mx, my) {
+            var b = this.bounds();
+            return mx >= b.minX - 20 && mx <= b.maxX + 20 && my >= b.topY - 10 && my <= b.maxY + 15;
+        }
+    }
+
+    function migrateLegacyDecor(raw) {
+        if (raw && raw.type === "seaweedV2" && raw.points && raw.points.length === 12) {
+            var sw = new Seaweed(raw.baseX, raw.baseY, raw.h || 160, raw);
+            if (raw.id) sw.id = raw.id;
+            return sw;
+        }
+        if (raw && raw.x != null && raw.y != null) {
+            var by = typeof canvasCssH !== "undefined" ? Math.min(raw.y, canvasCssH - 10) : raw.y;
+            return new Seaweed(raw.x, by, 150 + (raw.seed != null ? (raw.seed % 80) : 40), null);
+        }
+        return null;
+    }
+
+    function drawSeaweedEditOverlay() {
+        if (!seaweedEditMode || !selectedSeaweed) return;
+        var b = selectedSeaweed.bounds();
+        var pad = 12;
+        ctx.save();
+        ctx.strokeStyle = "rgba(59, 130, 246, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(b.minX - pad, b.topY - pad, b.maxX - b.minX + pad * 2, b.maxY - b.minY + pad * 2);
+        ctx.setLineDash([]);
+        var hx = b.cx;
+        var hy = b.topY - pad - 6;
+        ctx.fillStyle = "#3b82f6";
+        ctx.beginPath();
+        ctx.arc(hx, hy, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function toggleSeaweedEditMode() {
+        seaweedEditMode = !seaweedEditMode;
+        selectedSeaweed = null;
+        seaweedHandleDrag = null;
+        if (seaweedEditMode) {
+            currentMode = "seaweed_edit";
+            document.getElementById("notice-text").innerText =
+                "🎨 โหมดแก้ไขสาหร่าย: คลิกสาหร่าย → ลากจุดฟ้าด้านบนเพื่อยืด/หดความสูง";
+            document.getElementById("notice").style.display = "block";
+        } else {
+            if (currentMode === "seaweed_edit") currentMode = "normal";
+            document.getElementById("notice").style.display = "none";
+        }
+    }
+    window.toggleSeaweedEditMode = toggleSeaweedEditMode;
 
     function startBreedingSequence(fa, fb) {
         var mother = fa.sex === "F" ? fa : fb;
@@ -1580,22 +1852,57 @@
         zenCanvasExitHandler(e);
     }, { passive: false });
 
+    canvas.addEventListener("mousemove", function (e) {
+        if (!seaweedHandleDrag || !seaweedHandleDrag.seaweed) return;
+        var sw = seaweedHandleDrag.seaweed;
+        var dy = seaweedHandleDrag.startY - e.clientY;
+        var nh = Math.max(80, Math.min(420, seaweedHandleDrag.startH + dy));
+        sw.rebuildHeight(nh);
+        sw.baseY = sw.points[0].y;
+        sw.baseX = sw.points[0].x;
+        saveGame();
+    });
+    canvas.addEventListener("mouseup", function () {
+        seaweedHandleDrag = null;
+    });
+    canvas.addEventListener("mouseleave", function () {
+        seaweedHandleDrag = null;
+    });
+
     canvas.addEventListener("mousedown", (e) => {
         if (isZenMode) return;
         if (breedingAnim) return;
 
         if (currentMode === "decor") {
-            decors.push({
-            x: e.clientX,
-            y: e.clientY,
-            phase: Math.random() * Math.PI * 2,
-            kelpColor: randomMutedKelpRgb(),
-            seed: Math.floor(Math.random() * 10000),
-        });
+            decors.push(new Seaweed(e.clientX, canvasCssH - 10, 150 + Math.random() * 60, null));
             cancelMode();
             db.gold -= 300;
             saveGame();
             updateUI();
+            return;
+        }
+
+        if (seaweedEditMode) {
+            var hx = 0,
+                hy = 0;
+            if (selectedSeaweed) {
+                var bb = selectedSeaweed.bounds();
+                hx = bb.cx;
+                hy = bb.topY - 18;
+            }
+            if (selectedSeaweed && Math.hypot(e.clientX - hx, e.clientY - hy) < 18) {
+                seaweedHandleDrag = { seaweed: selectedSeaweed, startY: e.clientY, startH: selectedSeaweed.h };
+                return;
+            }
+            var hit = null;
+            for (var di = decors.length - 1; di >= 0; di--) {
+                var dd = decors[di];
+                if (dd.type === "seaweedV2" && dd.hitTest && dd.hitTest(e.clientX, e.clientY)) {
+                    hit = dd;
+                    break;
+                }
+            }
+            selectedSeaweed = hit;
             return;
         }
 
@@ -1605,7 +1912,6 @@
         });
 
         if (clickedFish) {
-            if (clickedFish.isDead && currentMode === "breeding") return;
             if (currentMode === "breeding") {
                 if (clickedFish.isRetired) return;
                 if (clickedFish.age < 2) {
@@ -1718,7 +2024,6 @@
             "<b>ความสมบูรณ์ (Vitality):</b> " +
             f.vitality.toFixed(0) +
             "%" +
-            (f.isDead ? " <span style='color:#64748b'>(เสียชีวิต — ตักศพเพื่อลด Waste)</span>" : "") +
             "<br>" +
             "<b>สู้ (HP/ATK/DEF/SPD):</b> " +
             Math.round(eff.hp) +
@@ -1799,17 +2104,19 @@
         }
         if (db.autoBreedGenetics) {
             db.autoBreedCooldown = db.timer + 3600;
+        } else {
+            db.autoBreedCooldown = 0;
         }
         saveGame();
     }
 
     function stepAutoBreedGenetics() {
-        if (!db.autoBreedGenetics || breedingAnim || fishes.length >= MAX_FISH) return;
+        if (!db.autoBreedGenetics) return;
+        if (breedingAnim || fishes.length >= MAX_FISH) return;
         if (db.timer < db.autoBreedCooldown) return;
         var females = fishes.filter(function (f) {
             return (
                 f.sex === "F" &&
-                !f.isDead &&
                 !f.isRetired &&
                 f.age >= 2 &&
                 !f.breedingLocked &&
@@ -1819,7 +2126,6 @@
         var males = fishes.filter(function (f) {
             return (
                 f.sex === "M" &&
-                !f.isDead &&
                 !f.isRetired &&
                 f.age >= 2 &&
                 !f.breedingLocked &&
@@ -1849,12 +2155,7 @@
     function sellSelectedFish() {
         if (selectedFishes.length === 1) {
             var sf = selectedFishes[0];
-            if (sf.isDead) {
-                db.waste = Math.max(0, db.waste - 12);
-                db.carePoints += 1;
-            } else {
-                db.gold += sf.calcPrice();
-            }
+            db.gold += sf.calcPrice();
             fishes = fishes.filter((f) => f !== sf);
             selectedFishes = [];
             document.getElementById("panel-left").classList.remove("open");
@@ -1998,6 +2299,23 @@
     var SAVE_KEY = "majestic-betta-v7";
     var saveFrameCounter = 0;
 
+    function serializeDecor(d) {
+        if (d.type === "seaweedV2" && d.points) {
+            return {
+                type: "seaweedV2",
+                id: d.id,
+                baseX: d.baseX,
+                baseY: d.baseY,
+                h: d.h,
+                phase: d.phase,
+                points: d.points.map(function (p) {
+                    return { x: p.x, y: p.y, ox: p.ox, oy: p.oy };
+                }),
+            };
+        }
+        return d;
+    }
+
     function serializeFish(f) {
         return {
             id: f.id,
@@ -2017,12 +2335,12 @@
             tailColor: f.tailColor,
             age: f.age,
             isRetired: f.isRetired,
-            isDead: f.isDead,
             vitality: f.vitality,
             hunger: f.hunger,
             breedKey: f.breedKey,
             x: f.x,
             y: f.y,
+            targetX: f.targetX,
             targetY: f.targetY,
             dir: f.dir,
             flipScale: f.flipScale,
@@ -2041,6 +2359,7 @@
             breedCooldownUntilMs: f.breedCooldownUntilMs,
             aiPhase: f.aiPhase,
             aiTimer: f.aiTimer,
+            decisionTimer: f.decisionTimer,
             wanderTx: f.wanderTx,
             wanderTy: f.wanderTy,
             vx: f.vx,
@@ -2052,7 +2371,6 @@
             _parentBaseClassB: f._parentBaseClassB,
             injuredHealCdUntil: f.injuredHealCdUntil,
             displayName: f.displayName,
-            deadFloatPhase: f.deadFloatPhase,
         };
     }
 
@@ -2097,7 +2415,7 @@
                 fishIdCounter: fishIdCounter,
                 speedMultiplier: window.speedMultiplier,
                 fishes: fishes.map(serializeFish),
-                decors: decors,
+                decors: decors.map(serializeDecor),
                 eggs: eggData,
                 foods: foods,
             };
@@ -2123,6 +2441,7 @@
             db.lastAutoFeedMs = payload.db.lastAutoFeedMs || 0;
             db.autoBreedGenetics = !!payload.db.autoBreedGenetics;
             db.autoBreedCooldown = payload.db.autoBreedCooldown || 0;
+            if (!db.autoBreedGenetics) db.autoBreedCooldown = 0;
             db.autoBreedIntervalFrames = payload.db.autoBreedIntervalFrames || 10800;
             if (payload.waterState) {
                 waterState.theme = payload.waterState.theme || "auto";
@@ -2136,7 +2455,13 @@
             if (payload.speedMultiplier != null && !isNaN(payload.speedMultiplier)) {
                 window.speedMultiplier = Math.max(0.1, Math.min(1, payload.speedMultiplier));
             }
-            decors = Array.isArray(payload.decors) ? payload.decors : [];
+            decors = [];
+            if (Array.isArray(payload.decors)) {
+                for (var di = 0; di < payload.decors.length; di++) {
+                    var swObj = migrateLegacyDecor(payload.decors[di]);
+                    if (swObj) decors.push(swObj);
+                }
+            }
             foods = Array.isArray(payload.foods) ? payload.foods : [];
             fishes = [];
             if (Array.isArray(payload.fishes)) {
@@ -2184,6 +2509,16 @@
             console.warn("loadGame", err);
             return false;
         }
+    }
+
+    function resetLocalData() {
+        if (!confirm("ล้างข้อมูลเซฟในเครื่องและเริ่มใหม่? จะโหลดหน้าใหม่ทันที")) return;
+        try {
+            localStorage.removeItem(SAVE_KEY);
+        } catch (err) {
+            console.warn("resetLocalData", err);
+        }
+        location.reload();
     }
 
     var gachaState = { mode: "start", pool: [], picked: [] };
@@ -2350,55 +2685,17 @@
         loop();
     }
 
-    function randomMutedKelpRgb() {
-        var r = 95 + Math.floor(Math.random() * 38);
-        var g = 125 + Math.floor(Math.random() * 42);
-        var b = 98 + Math.floor(Math.random() * 35);
-        return "rgb(" + r + "," + g + "," + b + ")";
-    }
     function rgbStringFromHex(hex) {
         var o = hexToRgb(hex);
         return "rgb(" + o.r + "," + o.g + "," + o.b + ")";
     }
 
-    function drawSerratedLeafPath(ctx2, x0, y0, w, h, teeth) {
-        var n = teeth || 14;
-        ctx2.beginPath();
-        ctx2.moveTo(x0 - w * 0.08, y0 + h * 0.5);
-        var tipX = x0,
-            tipY = y0 - h * 0.5;
-        ctx2.quadraticCurveTo(x0 + w * 0.45, y0 - h * 0.15, tipX, tipY);
-        ctx2.quadraticCurveTo(x0 - w * 0.45, y0 - h * 0.15, x0 + w * 0.08, y0 + h * 0.5);
-        for (var t = 0; t <= n; t++) {
-            var ty = y0 + h * 0.5 + (t / n) * h * 0.42;
-            var inward = t % 2 === 0 ? w * 0.12 : 0;
-            ctx2.lineTo(x0 - w * 0.42 + inward, ty);
-        }
-        ctx2.closePath();
-    }
-
     function drawDecors() {
-        decors.forEach((d) => {
-            if (!d.kelpColor) d.kelpColor = randomMutedKelpRgb();
-            var ph = d.phase != null ? d.phase : 0;
-            var seed = d.seed != null ? d.seed : 0;
-            var sway = Math.sin(db.timer * 0.012 + d.x * 0.006 + ph) * 4;
-            var baseX = d.x + sway;
-            var baseY = d.y;
-            for (var layer = 0; layer < 3; layer++) {
-                var rot = ph + layer * 0.35 + (seed % 7) * 0.02;
-                var lx = baseX + Math.cos(rot) * layer * 12;
-                var ly = baseY + layer * 18;
-                var w = 55 + (seed % 5) * 8 + layer * 10;
-                var h = 110 + layer * 22;
-                ctx.save();
-                ctx.translate(lx, ly);
-                ctx.rotate(rot + Math.sin(db.timer * 0.01 + seed) * 0.04);
-                drawSerratedLeafPath(ctx, 0, 0, w, h, 16 + layer * 2);
-                ctx.fillStyle = d.kelpColor;
-                ctx.globalAlpha = 0.55 - layer * 0.06;
-                ctx.fill();
-                ctx.restore();
+        decors.forEach(function (d) {
+            if (d.type === "seaweedV2" && typeof d.update === "function") {
+                d.update();
+                d.applyFishDrift(fishes);
+                d.draw();
             }
         });
     }
@@ -2410,28 +2707,26 @@
         var airG = Math.max(0, Math.min(255, Math.round(wRgb.g * 0.8)));
         var airB = Math.max(0, Math.min(255, Math.round(wRgb.b * 0.8)));
         ctx.fillStyle = "rgb(" + airR + "," + airG + "," + airB + ")";
-        ctx.fillRect(0, 0, canvas.width, WATERLINE);
+        ctx.fillRect(0, 0, canvasCssW, WATERLINE);
         ctx.fillStyle = rgbStringFromHex(wHex);
-        ctx.fillRect(0, WATERLINE, canvas.width, canvas.height - WATERLINE);
+        ctx.fillRect(0, WATERLINE, canvasCssW, canvasCssH - WATERLINE);
         ctx.beginPath();
         ctx.moveTo(0, WATERLINE);
-        ctx.lineTo(canvas.width, WATERLINE);
+        ctx.lineTo(canvasCssW, WATERLINE);
         ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
         ctx.lineWidth = 2;
         ctx.stroke();
     }
 
     function loop() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, canvasCssW, canvasCssH);
 
         stepBreedingAnim();
         stepAutoBreedGenetics();
 
         db.timer++;
 
-        var liveFish = fishes.filter(function (f) {
-            return !f.isDead;
-        }).length;
+        var liveFish = fishes.length;
         db.o2 = Math.min(100, Math.max(0, 100 - liveFish * 5 + decors.length * 15));
         db.waste = Math.min(100, Math.max(0, db.waste + liveFish * 0.01 - decors.length * 0.05));
 
@@ -2446,7 +2741,7 @@
             if (nowMs - db.lastAutoFeedMs >= 4000) {
                 db.lastAutoFeedMs = nowMs;
                 var hungryFish = fishes.find(function (f) {
-                    return !f.isDead && f.hunger > 60;
+                    return f.hunger > 60;
                 });
                 if (hungryFish) {
                     db.foodCount--;
@@ -2457,8 +2752,9 @@
 
         drawWaterline();
         drawDecors();
+        drawSeaweedEditOverlay();
 
-        foods = foods.filter((f) => !f.eaten && f.y < canvas.height);
+        foods = foods.filter((f) => !f.eaten && f.y < canvasCssH);
         ctx.fillStyle = "#e67e22";
         foods.forEach((f) => {
             f.y += 1.05;
@@ -2506,6 +2802,7 @@
     window.enterBreedingMode = enterBreedingMode;
     window.toggleAutoBreedGenetics = toggleAutoBreedGenetics;
     window.changeBG = changeBG;
+    window.resetLocalData = resetLocalData;
 
     init();
 })();
